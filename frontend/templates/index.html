@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero-section fade-in">
+    <div class="hero-content">
+        <h1>Electrical Doorstep Services <br><span class="gradient-text">Simple & Professional</span></h1>
+        <p>Get highly-rated certified electricians, appliance technicians, and power backup experts at your home in minutes.</p>
+        
+        <!-- Dynamic Search -->
+        <div class="search-container">
+            <i data-lucide="search" class="search-icon"></i>
+            <input type="text" id="home-search-input" class="search-input" placeholder="Search for Electrician, Switchboard, Inverter..." onkeyup="filterHomeCategories()">
+        </div>
+    </div>
+    <div class="hero-visual">
+        <div class="hero-image-wrapper">
+            <img src="{{ url_for('static', filename='images/hero_electrician.png') }}" alt="Professional Electrician" class="hero-image" fetchpriority="high">
+            <div class="hero-image-overlay"></div>
+        </div>
+    </div>
+</section>
+
+<!-- Categories Section -->
+<section style="margin-bottom: 5rem;" class="fade-in">
+    <h2 class="section-title">Explore Our Service Offerings</h2>
+    <div class="category-grid" id="home-category-grid">
+        {% for cat in categories %}
+            <div class="category-card scroll-reveal" onclick="window.location.href='{{ url_for('services', category=cat.name) }}'" data-name="{{ cat.name }}">
+                <i data-lucide="{{ cat.icon_key }}"></i>
+                <h3>{{ cat.name }}</h3>
+                <p>{{ cat.description }}</p>
+                <div style="margin-top: 1rem; color: #a5b4fc; font-weight: 600; font-size: 0.85rem;">
+                    Starts at ₹{{ cat.base_price | int }}
+                </div>
+            </div>
+        {% else %}
+            <div style="grid-column: span 3; text-align: center; color: var(--text-muted);">
+                <i data-lucide="alert-triangle" style="width: 48px; height: 48px; margin: 0 auto 1rem auto; display: block; color: var(--warning);"></i>
+                <p>No service categories seeded yet. Make sure backend and migrations are complete.</p>
+            </div>
+        {% endfor %}
+    </div>
+</section>
+
+<!-- Promo Banner Section -->
+<section class="promo-banner-section fade-in scroll-reveal">
+    <div class="promo-banner-card glass-card">
+        <div class="promo-image-side">
+            <img src="{{ url_for('static', filename='images/ac_repair.png') }}" alt="Air Conditioning and Appliance Care" class="promo-image" loading="lazy">
+        </div>
+        <div class="promo-content-side">
+            <span class="promo-tag">Mumbai Exclusive</span>
+            <h2>AC & Major Appliance Diagnostics</h2>
+            <p>Don't let the heat get to you. Book our certified experts for rapid cooling repair, compressor diagnostics, gas refilling, and switchboard safety checks.</p>
+            <ul class="promo-features-list">
+                <li><i data-lucide="check-circle" style="color: var(--primary);"></i> 100% Verified Electricians & Technicians</li>
+                <li><i data-lucide="check-circle" style="color: var(--primary);"></i> Mumbai Municipal & Suburbs Coverage</li>
+                <li><i data-lucide="check-circle" style="color: var(--primary);"></i> Fixed base rates with no hidden fees</li>
+            </ul>
+            <a href="{{ url_for('services', category='AC & Appliance Repair') }}" class="btn-primary">Book Repair Service <i data-lucide="arrow-right"></i></a>
+        </div>
+    </div>
+</section>
+
+<!-- Trust Banner -->
+<section style="margin-bottom: 5rem;" class="fade-in">
+    <h2 class="section-title">Why Indian Households Choose purakam</h2>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem;">
+        <div class="glass-card scroll-reveal" style="text-align: center; padding: 2rem 1.5rem;">
+            <i data-lucide="award" style="color: var(--accent); width: 40px; height: 40px; margin-bottom: 1rem;"></i>
+            <h3>Verified Professionals</h3>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">Every partner passes strict identity checks, background verification, and trade assessments.</p>
+        </div>
+        
+        <div class="glass-card scroll-reveal" style="text-align: center; padding: 2rem 1.5rem;">
+            <i data-lucide="indian-rupee" style="color: var(--success); width: 40px; height: 40px; margin-bottom: 1rem;"></i>
+            <h3>Upfront Fixed Pricing</h3>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">No surprises or hidden fees. See final rates and detailed breakdowns before booking.</p>
+        </div>
+        
+        <div class="glass-card scroll-reveal" style="text-align: center; padding: 2rem 1.5rem;">
+            <i data-lucide="clock" style="color: var(--primary); width: 40px; height: 40px; margin-bottom: 1rem;"></i>
+            <h3>60-Minute Response</h3>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">Pick convenient, flexible hourly slots. Emergency bookings matched with nearby online professionals.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Live Stats Section -->
+<section class="fade-in">
+    <div class="stats-banner scroll-reveal">
+        <div class="stat-item">
+            <h2>25,000+</h2>
+            <p>Services Delivered</p>
+        </div>
+        <div class="stat-item">
+            <h2>4.8★</h2>
+            <p>Average Customer Rating</p>
+        </div>
+        <div class="stat-item">
+            <h2>1,500+</h2>
+            <p>Certified Partners</p>
+        </div>
+        <div class="stat-item">
+            <h2>12+</h2>
+            <p>Indian Metro Cities</p>
+        </div>
+    </div>
+</section>
+
+<script>
+    function filterHomeCategories() {
+        const query = document.getElementById("home-search-input").value.toLowerCase();
+        const cards = document.querySelectorAll("#home-category-grid .category-card");
+        
+        cards.forEach(card => {
+            const name = card.dataset.name.toLowerCase();
+            if (name.includes(query)) {
+                card.style.display = "flex";
+            } else {
+                card.style.display = "none";
+            }
+        });
+    }
+</script>
+{% endblock %}

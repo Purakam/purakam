@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="booking-container fade-in">
+    <div class="glass-card" style="margin-bottom: 2rem;">
+        <h2 style="margin-bottom: 1.5rem; text-align: center;">Book <span class="gradient-text">{{ category_name }}</span> Service</h2>
+        
+        <!-- Multi-step navigation tracker indicators -->
+        <div class="booking-steps-nav">
+            <div class="step-indicator active">1</div>
+            <div class="step-indicator">2</div>
+            <div class="step-indicator">3</div>
+        </div>
+
+        <form id="booking-wizard-form" onsubmit="return false;">
+            <!-- Hidden Fields -->
+            <input type="hidden" id="category_name" value="{{ category_name }}">
+            <input type="hidden" id="base_price_val" value="{{ base_price }}">
+            <input type="hidden" id="partner_id" value="{{ partner_id or '' }}">
+
+            <!-- STEP 1: Date & Time Slot -->
+            <div class="booking-step active" id="step-1">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="clock" style="color: var(--primary); vertical-align: middle;"></i> Select Schedule</h3>
+                
+                <div class="form-group">
+                    <label for="booking_date">Preferred Date</label>
+                    <input type="date" id="booking_date" class="form-input" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="time_slot">Preferred Time Slot</label>
+                    <select id="time_slot" class="filter-select" required>
+                        <option value="">Choose a slot...</option>
+                        <option value="09:00 AM - 11:00 AM">09:00 AM - 11:00 AM</option>
+                        <option value="11:00 AM - 01:00 PM">11:00 AM - 01:00 PM</option>
+                        <option value="01:00 PM - 03:00 PM">01:00 PM - 03:00 PM</option>
+                        <option value="03:00 PM - 05:00 PM">03:00 PM - 05:00 PM</option>
+                        <option value="05:00 PM - 07:00 PM">05:00 PM - 07:00 PM</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 2rem;">
+                    <button type="button" class="btn-primary" id="btn-next-1">Next Step <i data-lucide="arrow-right"></i></button>
+                </div>
+            </div>
+
+            <!-- STEP 2: Address & Details -->
+            <div class="booking-step" id="step-2">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="map-pin" style="color: var(--primary); vertical-align: middle;"></i> Service Location & Details</h3>
+                
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <label for="address" style="margin-bottom: 0;">Full Doorstep Address</label>
+                        <button type="button" id="btn-get-location" class="chat-launcher-btn" style="padding: 0.35rem 0.7rem; font-size: 0.75rem; border-radius: var(--border-radius-sm); font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem;" onclick="fetchCurrentLocationAddress(this)">
+                            <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i> Use Current Location
+                        </button>
+                    </div>
+                    <textarea id="address" class="form-input" placeholder="Flat / House No., Building Name, Street Name, Landmark, City, State - PIN Code" required>{{ session.get('user_address', '') or '' }}</textarea>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="area_name">Select Service Area / District <span style="color: var(--danger);">*</span></label>
+                        <select id="area_name" class="filter-select" required style="width: 100%; box-sizing: border-box;">
+                            <option value="">Choose region...</option>
+                            <option value="Mumbai">Mumbai</option>
+                            <option value="Mumbai Suburban">Mumbai Suburban</option>
+                            <option value="Navi Mumbai">Navi Mumbai</option>
+                            <option value="Thane">Thane</option>
+                        </select>
+
+                    </div>
+                    <div class="form-group">
+                        <label for="pincode">Area Pincode (6 Digits)</label>
+                        <input type="text" id="pincode" class="form-input" placeholder="e.g. 400050" maxlength="6" required pattern="\d{6}" title="Pincode must be a 6-digit number">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="details">Additional Instructions / Job Description (Optional)</label>
+                    <textarea id="details" class="form-input" placeholder="Describe what needs repair, e.g., ceiling fan regulator broken, AC filter cleaning, water tap leaking..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="job_attachments">Upload Pictures / Videos of the Problem (Optional)</label>
+                    <input type="file" id="job_attachments" class="form-input" accept="image/*,video/*" style="padding: 0.5rem 1rem;" multiple>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.3rem; display: block;">Supported formats: JPEG, PNG, GIF, MP4, MOV, WEBM (Max 15MB)</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; margin-top: 2rem;">
+                    <button type="button" class="btn-secondary" id="btn-prev-2"><i data-lucide="arrow-left"></i> Back</button>
+                    <button type="button" class="btn-primary" id="btn-next-2">Next Step <i data-lucide="arrow-right"></i></button>
+                </div>
+            </div>
+
+            <!-- STEP 3: Review & Payment -->
+            <div class="booking-step" id="step-3">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="credit-card" style="color: var(--primary); vertical-align: middle;"></i> Order Review & Payment</h3>
+                
+                <!-- Review summary details -->
+                <div style="background: rgba(0, 0, 0, 0.2); padding: 1.2rem; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); margin-bottom: 1.5rem;">
+                    <h4 style="color: #a5b4fc; margin-bottom: 0.5rem;">Service Overview</h4>
+                    <p style="font-size: 0.9rem;"><strong>Service:</strong> <span id="summary-category">-</span></p>
+                    <p style="font-size: 0.9rem;"><strong>Scheduled Date:</strong> <span id="summary-date">-</span></p>
+                    <p style="font-size: 0.9rem;"><strong>Time Slot:</strong> <span id="summary-slot">-</span></p>
+                </div>
+
+                <!-- Invoice Details -->
+                <table class="invoice-table">
+                    <thead>
+                        <tr>
+                            <th>Bill Component</th>
+                            <th style="text-align: right;">Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Base Booking Rate</td>
+                            <td class="amount" id="invoice-base">₹0.00</td>
+                        </tr>
+                        <tr>
+                            <td>GST (18% Service Tax)</td>
+                            <td class="amount" id="invoice-gst">₹0.00</td>
+                        </tr>
+                        <tr>
+                            <td>Platform Fee</td>
+                            <td class="amount" id="invoice-platform">₹49.00</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Grand Total</td>
+                            <td class="amount" id="invoice-total">₹0.00</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- Payment Selection -->
+                <div class="form-group">
+                    <label style="margin-bottom: 0.6rem; display: block; font-weight: 600;">Choose Payment Method</label>
+                    <div class="payment-selector">
+                        <label class="payment-option">
+                            <input type="radio" name="payment_method" value="UPI" checked>
+                            <i data-lucide="smartphone"></i>
+                            <div>
+                                <strong>Instant UPI (Google Pay, PhonePe, Paytm)</strong>
+                                <div style="font-size: 0.8rem; color: var(--text-secondary);">Pay securely using UPI interface</div>
+                            </div>
+                        </label>
+                        
+                        <label class="payment-option">
+                            <input type="radio" name="payment_method" value="COD">
+                            <i data-lucide="hand-coins"></i>
+                            <div>
+                                <strong>Cash / UPI After Service (Pay Partner)</strong>
+                                <div style="font-size: 0.8rem; color: var(--text-secondary);">Hand over cash or scan QR once work is completed</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Expandable UPI Address Field -->
+                <div class="upi-form-wrapper" id="upi-input-wrapper">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="upi_id" style="font-size: 0.85rem; color: #a5b4fc;">Enter your UPI ID</label>
+                        <input type="text" id="upi_id" class="form-input" placeholder="mobile-no@ybl or name@okaxis" style="padding: 0.6rem 1rem;">
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; margin-top: 2rem;">
+                    <button type="button" class="btn-secondary" id="btn-prev-3"><i data-lucide="arrow-left"></i> Back</button>
+                    <button type="button" class="btn-primary" id="btn-submit-booking"><i data-lucide="check"></i> Confirm & Book Now</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Set date input minimum value to tomorrow
+    document.addEventListener("DOMContentLoaded", () => {
+        const dateInput = document.getElementById("booking_date");
+        if (dateInput) {
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const yyyy = tomorrow.getFullYear();
+            let mm = tomorrow.getMonth() + 1;
+            let dd = tomorrow.getDate();
+            
+            if (mm < 10) mm = '0' + mm;
+            if (dd < 10) dd = '0' + dd;
+            
+            dateInput.min = `${yyyy}-${mm}-${dd}`;
+            dateInput.value = `${yyyy}-${mm}-${dd}`;
+        }
+    });
+</script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+    window.RAZORPAY_KEY_ID = "{{ RAZORPAY_KEY_ID }}";
+    window.userEmail = "{{ session.get('user_email', '') }}";
+    window.userName = "{{ session.get('user_name', '') }}";
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+.expo-shared/
+web-build/
+*.log
+*.db
+.DS_Store
+.env
+.env.local
+android/.gradle
+android/.idea

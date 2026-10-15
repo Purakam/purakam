@@ -1,0 +1,9 @@
+{
+  "appId": "com.purakam.app",
+  "appName": "Purakam",
+  "webDir": "frontend/static",
+  "server": {
+    "url": "http://10.0.2.2:5000",
+    "cleartext": true
+  }
+}

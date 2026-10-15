@@ -1,0 +1,52 @@
+databases:
+  - name: purakam-db
+    databaseName: purakam
+    user: admin
+    plan: free
+
+services:
+  # 1. FastAPI Backend Service
+  - type: web
+    name: purakam-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.seed && uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: purakam-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: EMAIL_FROM          # verified sender address for Brevo/SendGrid
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: GOOGLE_ALLOWED_CLIENT_IDS   # comma-separated Google OAuth client IDs (web/android/ios)
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.10.8
+
+  # 2. Flask Frontend Service
+  - type: web
+    name: purakam-frontend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn frontend.app:app
+    envVars:
+      - key: BACKEND_API_URL
+        fromService:
+          type: web
+          name: purakam-backend
+          property: host
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.10.8
+

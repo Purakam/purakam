@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Purakam",
+    "slug": "purakam-android",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.purakam.android",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Allow Purakam to use your location while the app is open for current location and service matching.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow Purakam to access your location when needed for better service delivery.",
+        "NSPhotoLibraryUsageDescription": "Allow Purakam to select images when uploading booking attachments.",
+        "NSCameraUsageDescription": "Allow Purakam to take photos for booking attachments.",
+        "NSUserTrackingUsageDescription": "Allow Purakam to send you notifications and improve your experience.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.purakam.android",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "POST_NOTIFICATIONS"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "extra": {
+      "apiUrl": "https://purakam-backend-upr1.onrender.com/api",
+      "eas": {
+        "projectId": "d76ca423-62e1-48d1-9faa-cab621cb551a"
+      }
+    },
+    "plugins": [
+      "expo-web-browser"
+    ]
+  }
+}

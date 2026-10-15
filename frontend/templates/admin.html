@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Admin Page Header -->
+    <div style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>Purakam Administrator Terminal</h2>
+            <p style="color: var(--text-secondary);">Supervise operations, manage service categories, and monitor analytics</p>
+        </div>
+        <div class="localization-badge">
+            <span>Admin Clearance</span>
+            <span class="flag">🛡️</span>
+        </div>
+    </div>
+
+    <!-- Admin Navigation Tabs -->
+    <div style="display: flex; gap: 1rem; border-bottom: 1px solid var(--border-glass); margin-bottom: 2.5rem; padding-bottom: 0.5rem;">
+        <button class="nav-link active" id="tab-btn-overview" onclick="switchAdminTab('overview')" style="cursor: pointer; border-radius: var(--border-radius-sm); font-weight: 600;">
+            <i data-lucide="bar-chart-3"></i> Overview
+        </button>
+        <button class="nav-link" id="tab-btn-users" onclick="switchAdminTab('users')" style="cursor: pointer; border-radius: var(--border-radius-sm); font-weight: 600;">
+            <i data-lucide="users"></i> Users & Partners
+        </button>
+        <button class="nav-link" id="tab-btn-bookings" onclick="switchAdminTab('bookings')" style="cursor: pointer; border-radius: var(--border-radius-sm); font-weight: 600;">
+            <i data-lucide="clipboard-list"></i> Transactions
+        </button>
+        <button class="nav-link" id="tab-btn-categories" onclick="switchAdminTab('categories')" style="cursor: pointer; border-radius: var(--border-radius-sm); font-weight: 600;">
+            <i data-lucide="settings"></i> Service Configuration
+        </button>
+    </div>
+
+    <!-- TAB 1: OVERVIEW -->
+    <div id="tab-overview" class="admin-tab-content active">
+        <!-- Stats Metrics Row -->
+        <div class="dashboard-grid">
+            <div class="dashboard-stat-card">
+                <div class="stat-icon"><i data-lucide="activity"></i></div>
+                <div class="stat-data">
+                    <h3>{{ stats.total_bookings }}</h3>
+                    <p>Total Bookings</p>
+                </div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="stat-icon"><i data-lucide="users"></i></div>
+                <div class="stat-data">
+                    <h3>{{ stats.total_customers }}</h3>
+                    <p>Registered Customers</p>
+                </div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="stat-icon success"><i data-lucide="zap"></i></div>
+                <div class="stat-data">
+                    <h3>{{ stats.total_partners_online }} Online</h3>
+                    <p>{{ stats.total_partners_offline }} Offline Partners</p>
+                </div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="stat-icon"><i data-lucide="indian-rupee"></i></div>
+                <div class="stat-data">
+                    <h3>₹{{ stats.total_revenue | int }}</h3>
+                    <p>Processed Volume</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dispatch System Metrics Row -->
+        <div class="dashboard-grid" style="margin-top: 1.5rem;">
+            <div class="dashboard-stat-card">
+                <div class="stat-icon warning"><i data-lucide="radio" class="pulse"></i></div>
+                <div class="stat-data">
+                    <h3>{{ stats.total_requested_bookings or 0 }}</h3>
+                    <p>Broadcasting Requests</p>
+                </div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="stat-icon"><i data-lucide="pocket-knife"></i></div>
+                <div class="stat-data">
+                    <h3>{{ stats.total_assigned_bookings or 0 }}</h3>
+                    <p>Assigned Jobs</p>
+                </div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="stat-icon danger"><i data-lucide="x-circle"></i></div>
+                <div class="stat-data">
+                    <h3>{{ stats.total_cancelled_bookings or 0 }}</h3>
+                    <p>Expired / Cancelled</p>
+                </div>
+            </div>
+            <div class="dashboard-stat-card">
+                <div class="stat-icon success"><i data-lucide="clock"></i></div>
+                <div class="stat-data">
+                    <h3>
+                        {% if stats.average_assignment_time_seconds and stats.average_assignment_time_seconds >= 60 %}
+                            {{ (stats.average_assignment_time_seconds / 60) | round(1) }} mins
+                        {% else %}
+                            {{ (stats.average_assignment_time_seconds or 0) | round(1) }} secs
+                        {% endif %}
+                    </h3>
+                    <p>Avg Assignment Speed</p>
+                </div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2.5rem; margin-top: 2rem;">
+            <!-- SVG Financial Earnings Chart -->
+            <div class="glass-card">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="trending-up" style="color: var(--primary); vertical-align: middle;"></i> Platform Gross Revenue Trend</h3>
+                <div class="earnings-chart-container">
+                    <svg class="chart-svg" viewBox="0 0 500 150">
+                        <defs>
+                            <linearGradient id="admin-chart-gradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#ffffff" />
+                                <stop offset="100%" stop-color="#515156" />
+                            </linearGradient>
+                            <linearGradient id="admin-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#000000" stop-opacity="0.1" />
+                                <stop offset="100%" stop-color="#fcfcfd" stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <!-- Grid lines -->
+                        <line x1="0" y1="25" x2="500" y2="25" class="chart-grid-line" />
+                        <line x1="0" y1="75" x2="500" y2="75" class="chart-grid-line" />
+                        <line x1="0" y1="125" x2="500" y2="125" class="chart-grid-line" />
+                        <!-- Area -->
+                        <path d="M 0 130 Q 100 80 200 110 T 400 40 T 500 20 L 500 150 L 0 150 Z" class="chart-area" style="fill: url(#admin-area-gradient); opacity: 0.12;" />
+                        <!-- Line -->
+                        <path d="M 0 130 Q 100 80 200 110 T 400 40 T 500 20" class="chart-line" />
+                    </svg>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; padding: 0 0.5rem;">
+                        <span>Q1 Startup</span>
+                        <span>Q2 Launch</span>
+                        <span>Q3 Growth</span>
+                        <span>Today</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category Breakdown Grid -->
+            <div class="glass-card" style="padding: 1.5rem;">
+                <h3 style="margin-bottom: 1.2rem; font-size: 1.15rem;"><i data-lucide="pie-chart" style="color: var(--primary); vertical-align: middle;"></i> Category Metrics</h3>
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    {% for cat in stats.category_breakdown %}
+                        <div style="padding: 0.8rem; background: rgba(0,0,0,0.02); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <span style="font-weight: 600; font-size: 0.9rem;">{{ cat.name }}</span>
+                            </div>
+                            <span class="status-badge badge-completed" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">
+                                {{ cat.count }} Bookings
+                            </span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: USERS & PARTNERS -->
+    <div id="tab-users" class="admin-tab-content">
+        <div class="glass-card" style="padding: 1.8rem; overflow-x: auto;">
+            <h3 style="margin-bottom: 1.5rem;"><i data-lucide="shield-alert" style="color: var(--primary); vertical-align: middle;"></i> User Database Registry</h3>
+            
+            <!-- Filter Controls for Users -->
+            <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center;">
+                <div style="flex: 1; min-width: 250px; position: relative;">
+                    <i data-lucide="search" style="position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-muted);"></i>
+                    <input type="text" id="admin-users-search" placeholder="Search users by name, email, phone..." class="form-input" style="padding-left: 2.2rem; font-size: 0.85rem; padding-top: 0.5rem; padding-bottom: 0.5rem; width: 100%;" oninput="applyAdminUsersFilters()">
+                </div>
+                <div style="min-width: 160px;">
+                    <select id="admin-users-role-filter" class="filter-select" style="padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); background: var(--bg-main); color: var(--text-primary); cursor: pointer; width: 100%;" onchange="applyAdminUsersFilters()">
+                        <option value="all">All Roles</option>
+                        <option value="customer">Customer</option>
+                        <option value="partner">Partner</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+            </div>
+
+            <table id="admin-users-table" style="width: 100%; border-collapse: collapse; min-width: 700px; text-align: left;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--primary); color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                        <th style="padding: 1rem;">User ID</th>
+                        <th style="padding: 1rem;">Name</th>
+                        <th style="padding: 1rem;">Email Address</th>
+                        <th style="padding: 1rem;">Contact Phone</th>
+                        <th style="padding: 1rem;">Role</th>
+                        <th style="padding: 1rem;">Specialty / Stats</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                        <tr class="user-row" data-role="{{ u.role }}" data-searchable="{{ u.name.lower() }} {{ u.email.lower() }} {{ u.phone }} #usr{{ u.id }}" style="border-bottom: 1px solid var(--border-glass); font-size: 0.9rem; transition: var(--transition-fast);" onmouseover="this.style.background='rgba(0,0,0,0.02)'" onmouseout="this.style.background='transparent'">
+                            <td style="padding: 1rem; color: var(--text-muted); font-family: monospace;">#USR{{ u.id }}</td>
+                            <td style="padding: 1rem; font-weight: 600;">{{ u.name }}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary);">{{ u.email }}</td>
+                            <td style="padding: 1rem;">{{ u.phone }}</td>
+                            <td style="padding: 1rem;">
+                                <span class="status-badge {% if u.role == 'admin' %}badge-completed{% elif u.role == 'partner' %}badge-accepted{% else %}badge-pending{% endif %}" style="font-size: 0.7rem; font-weight: 700;">
+                                    {{ u.role | upper }}
+                                </span>
+                            </td>
+                            <td style="padding: 1rem;">
+                                {% if u.role == 'partner' and u.partner_profile %}
+                                    <span style="font-weight: 500; font-size: 0.8rem;">
+                                        {{ u.partner_profile.service_category }} • {{ u.partner_profile.rating }}★ • {{ u.partner_profile.completed_jobs }} Jobs
+                                    </span>
+                                {% else %}
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB 3: TRANSACTIONS & BOOKINGS -->
+    <div id="tab-bookings" class="admin-tab-content">
+        <div class="glass-card" style="padding: 1.8rem; overflow-x: auto;">
+            <h3 style="margin-bottom: 1.5rem;"><i data-lucide="credit-card" style="color: var(--primary); vertical-align: middle;"></i> Central Booking Ledger</h3>
+            
+            <!-- Filter Controls for Transactions -->
+            <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center;">
+                <div style="flex: 1; min-width: 250px; position: relative;">
+                    <i data-lucide="search" style="position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-muted);"></i>
+                    <input type="text" id="admin-bookings-search" placeholder="Search transactions by Booking ID, Service, Customer, Partner..." class="form-input" style="padding-left: 2.2rem; font-size: 0.85rem; padding-top: 0.5rem; padding-bottom: 0.5rem; width: 100%;" oninput="applyAdminBookingsFilters()">
+                </div>
+                <div style="min-width: 150px;">
+                    <select id="admin-bookings-status-filter" class="filter-select" style="padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); background: var(--bg-main); color: var(--text-primary); cursor: pointer; width: 100%;" onchange="applyAdminBookingsFilters()">
+                        <option value="all">All Statuses</option>
+                        <option value="requested">Requested</option>
+                        <option value="accepted">Accepted</option>
+                        <option value="on_the_way">On The Way</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div style="min-width: 150px;">
+                    <select id="admin-bookings-sort" class="filter-select" style="padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); background: var(--bg-main); color: var(--text-primary); cursor: pointer; width: 100%;" onchange="applyAdminBookingsFilters()">
+                        <option value="default">Default Order</option>
+                        <option value="price-desc">Price: High to Low</option>
+                        <option value="price-asc">Price: Low to High</option>
+                        <option value="date-desc">Date: Newest</option>
+                        <option value="date-asc">Date: Oldest</option>
+                    </select>
+                </div>
+            </div>
+
+            <table style="width: 100%; border-collapse: collapse; min-width: 800px; text-align: left;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--primary); color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                        <th style="padding: 1rem;">Booking ID</th>
+                        <th style="padding: 1rem;">Service</th>
+                        <th style="padding: 1rem;">Customer</th>
+                        <th style="padding: 1rem;">Assigned Partner</th>
+                        <th style="padding: 1rem;">Status</th>
+                        <th style="padding: 1rem;">Grand Total</th>
+                        <th style="padding: 1rem; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-bookings-tbody">
+                    {% for b in bookings %}
+                        <tr class="booking-row" data-status="{{ b.status }}" data-price="{{ b.price }}" data-date="{{ b.booking_date }}" data-id="{{ b.id }}" data-searchable="#srv{{ b.id }} {{ b.service_category.lower() }} {{ b.customer.name.lower() }} {% if b.partner %}{{ b.partner.name.lower() }}{% endif %}" style="border-bottom: 1px solid var(--border-glass); font-size: 0.9rem; transition: var(--transition-fast);" onmouseover="this.style.background='rgba(0,0,0,0.02)'" onmouseout="this.style.background='transparent'">
+                            <td style="padding: 1rem; color: var(--text-muted); font-family: monospace;">#SRV{{ b.id }}</td>
+                            <td style="padding: 1rem; font-weight: 500;">{{ b.service_category }}</td>
+                            <td style="padding: 1rem;">
+                                <div>{{ b.customer.name }}</div>
+                                <span style="font-size: 0.75rem; color: var(--text-muted);">{{ b.customer.phone }}</span>
+                            </td>
+                            <td style="padding: 1rem;">
+                                {% if b.partner %}
+                                    <div>{{ b.partner.name }}</div>
+                                    <span style="font-size: 0.75rem; color: var(--text-muted);">{{ b.partner.phone }}</span>
+                                {% else %}
+                                    <span style="color: var(--status-pending-color); font-style: italic; font-size: 0.85rem;">Pending Assignment</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 1rem;">
+                                <span class="status-badge badge-{{ b.status }}" style="font-size: 0.65rem; font-weight: 700;">
+                                    {{ b.status | replace('_', ' ') }}
+                                </span>
+                            </td>
+                            <td style="padding: 1rem; font-weight: 600; color: var(--text-primary);">₹{{ b.price | int }}</td>
+                            <td style="padding: 1rem; text-align: center;">
+                                {% if b.attachment_path %}
+                                    {% for img in b.attachment_path.split(',') %}
+                                        <a href="{{ BACKEND_BASE_URL }}/uploads/{{ img }}" target="_blank" class="chat-launcher-btn" style="padding: 0.35rem 0.7rem; font-size: 0.75rem; margin-right: 0.3rem; margin-bottom: 0.2rem; display: inline-flex; align-items: center; gap: 0.2rem;">
+                                            <i data-lucide="image" style="width: 12px; height: 12px;"></i> Media {{ loop.index }}
+                                        </a>
+                                    {% endfor %}
+                                {% endif %}
+                                {% if b.partner %}
+                                    <button class="chat-launcher-btn" onclick="openChatDrawer({{ b.id }}, 'Admin Monitor - Room #{{ b.id }}')" style="padding: 0.35rem 0.7rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.2rem;">
+                                        <i data-lucide="message-square" style="width: 12px; height: 12px;"></i> Inspect Chat
+                                    </button>
+                                {% else %}
+                                    <span style="font-size: 0.75rem; color: var(--text-muted);">No chat active</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB 4: SERVICE CONFIGURATION -->
+    <div id="tab-categories" class="admin-tab-content">
+        <div style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 2.5rem;">
+            <!-- Category Base Prices List -->
+            <div class="glass-card" style="padding: 1.8rem;">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="sliders" style="color: var(--primary); vertical-align: middle;"></i> Service Category Configuration</h3>
+                <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                    {% for cat in categories %}
+                        <div style="padding: 1.2rem; background: var(--bg-glass); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); display: flex; justify-content: space-between; align-items: center;" class="fade-in">
+                            <div style="max-width: 60%;">
+                                <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem;">
+                                    <i data-lucide="{{ cat.icon_key }}" style="width: 18px; color: var(--primary);"></i>
+                                    <strong style="font-size: 1.05rem;">{{ cat.name }}</strong>
+                                </div>
+                                <p style="font-size: 0.85rem; color: var(--text-secondary);">{{ cat.description }}</p>
+                            </div>
+                            
+                            <div style="text-align: right; display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-end;">
+                                <div style="font-size: 1.25rem; font-family: var(--font-heading); font-weight: 700; color: var(--text-primary);">₹{{ cat.base_price | int }}</div>
+                                <div style="display: flex; gap: 0.4rem;">
+                                    <input type="number" id="base-price-input-{{ cat.id }}" placeholder="New price" style="width: 80px; padding: 0.3rem; background: var(--bg-surface); border: 1px solid var(--border-glass); color: var(--text-primary); border-radius: 4px; font-size: 0.75rem;">
+                                    <button onclick="updateCategoryBasePrice({{ cat.id }}, '{{ cat.name }}')" class="btn-primary" style="font-size: 0.7rem; padding: 0.3rem 0.6rem; border-radius: 4px;">
+                                        Update
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Create New Service Category Card -->
+            <div class="glass-card" style="padding: 1.8rem; height: fit-content;">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="plus-circle" style="color: var(--primary); vertical-align: middle;"></i> Register New Category</h3>
+                <form id="create-category-form" onsubmit="event.preventDefault(); createNewCategory();">
+                    <div class="form-group">
+                        <label for="new_cat_name">Category Name</label>
+                        <input type="text" id="new_cat_name" class="form-input" placeholder="e.g. Appliance Installer" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new_cat_icon">Lucide Icon Key</label>
+                        <select id="new_cat_icon" class="filter-select" required>
+                            <option value="wrench">Wrench</option>
+                            <option value="plug">Plug</option>
+                            <option value="paint-brush">Paintbrush</option>
+                            <option value="scissors">Scissors</option>
+                            <option value="shield-alert">Shield</option>
+                            <option value="star">Star</option>
+                            <option value="hard-hat">Hard Hat</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="new_cat_price">Base Booking Fee (₹)</label>
+                        <input type="number" id="new_cat_price" class="form-input" placeholder="e.g. 349" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new_cat_desc">Detailed Service Description</label>
+                        <textarea id="new_cat_desc" class="form-input" style="height: 80px;" placeholder="Dynamic service offerings, descriptions, and limits..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
+                        Create Service Category <i data-lucide="check"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Tab switching controller
+    function switchAdminTab(tabName) {
+        document.querySelectorAll('.admin-tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-link').forEach(el => {
+            if (el.id && el.id.startsWith('tab-btn-')) {
+                el.classList.remove('active');
+            }
+        });
+        
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+        document.getElementById(`tab-btn-${tabName}`).classList.add('active');
+    }
+
+    // Call API to edit base booking price
+    async function updateCategoryBasePrice(serviceId, categoryName) {
+        const inputEl = document.getElementById(`base-price-input-${serviceId}`);
+        const newPrice = parseFloat(inputEl.value);
+        
+        if (isNaN(newPrice) || newPrice < 0) {
+            showToast("Please enter a valid base price value.", "warning");
+            return;
+        }
+        
+        try {
+            await apiRequest(`/admin/services/${serviceId}`, {
+                method: "PUT",
+                body: JSON.stringify({ base_price: newPrice })
+            });
+            showToast(`Baseline fee for ${categoryName} updated successfully!`, "success");
+            setTimeout(() => window.location.reload(), 1000);
+        } catch (err) {
+            console.error("Price update error:", err);
+        }
+    }
+
+    // Call API to submit a new service category
+    async function createNewCategory() {
+        const name = document.getElementById("new_cat_name").value;
+        const iconKey = document.getElementById("new_cat_icon").value;
+        const basePrice = parseFloat(document.getElementById("new_cat_price").value);
+        const description = document.getElementById("new_cat_desc").value;
+        
+        try {
+            await apiRequest("/admin/services", {
+                method: "POST",
+                body: JSON.stringify({
+                    name: name,
+                    icon_key: iconKey,
+                    description: description,
+                    base_price: basePrice
+                })
+            });
+            
+            showToast("New service category registered successfully!", "success");
+            setTimeout(() => window.location.reload(), 1000);
+        } catch (err) {
+            console.error("Create category error:", err);
+        }
+    }
+
+    // Client-Side Admin Users Filtering
+    function applyAdminUsersFilters() {
+        const query = document.getElementById("admin-users-search").value.toLowerCase().trim();
+        const role = document.getElementById("admin-users-role-filter").value;
+        const rows = document.querySelectorAll(".user-row");
+        
+        let visibleCount = 0;
+        rows.forEach(row => {
+            const searchable = row.dataset.searchable.toLowerCase();
+            const uRole = row.dataset.role;
+            
+            const matchesSearch = searchable.includes(query);
+            const matchesRole = (role === "all" || uRole === role);
+            
+            if (matchesSearch && matchesRole) {
+                row.style.display = "";
+                visibleCount++;
+            } else {
+                row.style.display = "none";
+            }
+        });
+
+        // Manage no results display
+        let noResults = document.getElementById("admin-users-no-results");
+        const tbody = document.querySelector("#admin-users-table tbody");
+        if (visibleCount === 0) {
+            if (!noResults && tbody) {
+                noResults = document.createElement("tr");
+                noResults.id = "admin-users-no-results";
+                noResults.innerHTML = `
+                    <td colspan="6" style="padding: 3rem; text-align: center; color: var(--text-muted);">
+                        <i data-lucide="alert-circle" style="width: 32px; height: 32px; margin: 0 auto 0.5rem auto; display: block; opacity: 0.7;"></i>
+                        No registered users match your search filters.
+                    </td>
+                `;
+                tbody.appendChild(noResults);
+                if (window.lucide) lucide.createIcons();
+            } else if (noResults) {
+                noResults.style.display = "";
+            }
+        } else if (noResults) {
+            noResults.style.display = "none";
+        }
+    }
+
+    // Client-Side Admin Bookings/Transactions Filtering and Sorting
+    function applyAdminBookingsFilters() {
+        const query = document.getElementById("admin-bookings-search").value.toLowerCase().trim();
+        const status = document.getElementById("admin-bookings-status-filter").value;
+        const sortOption = document.getElementById("admin-bookings-sort").value;
+        const tbody = document.getElementById("admin-bookings-tbody");
+        const rows = Array.from(tbody.querySelectorAll(".booking-row"));
+        
+        let visibleCount = 0;
+        rows.forEach(row => {
+            const searchable = row.dataset.searchable.toLowerCase();
+            const bStatus = row.dataset.status;
+            
+            const matchesSearch = searchable.includes(query);
+            const matchesStatus = (status === "all" || bStatus === status);
+            
+            if (matchesSearch && matchesStatus) {
+                row.style.display = "";
+                visibleCount++;
+            } else {
+                row.style.display = "none";
+            }
+        });
+
+        // Manage no results display
+        let noResults = document.getElementById("admin-bookings-no-results");
+        if (visibleCount === 0) {
+            if (!noResults && tbody) {
+                noResults = document.createElement("tr");
+                noResults.id = "admin-bookings-no-results";
+                noResults.innerHTML = `
+                    <td colspan="7" style="padding: 3rem; text-align: center; color: var(--text-muted);">
+                        <i data-lucide="alert-circle" style="width: 32px; height: 32px; margin: 0 auto 0.5rem auto; display: block; opacity: 0.7;"></i>
+                        No bookings match your search filters.
+                    </td>
+                `;
+                tbody.appendChild(noResults);
+                if (window.lucide) lucide.createIcons();
+            } else if (noResults) {
+                noResults.style.display = "";
+            }
+        } else if (noResults) {
+            noResults.style.display = "none";
+        }
+
+        // Sorting logic
+        if (sortOption !== "default") {
+            rows.sort((a, b) => {
+                const priceA = parseFloat(a.dataset.price);
+                const priceB = parseFloat(b.dataset.price);
+                const idA = parseInt(a.dataset.id);
+                const idB = parseInt(b.dataset.id);
+                
+                // Parse dates
+                const dateA = new Date(a.dataset.date);
+                const dateB = new Date(b.dataset.date);
+
+                if (sortOption === "price-desc") {
+                    return priceB - priceA;
+                } else if (sortOption === "price-asc") {
+                    return priceA - priceB;
+                } else if (sortOption === "date-desc") {
+                    return dateB - dateA || idB - idA;
+                } else if (sortOption === "date-asc") {
+                    return dateA - dateB || idA - idB;
+                }
+                return 0;
+            });
+
+            // Re-append rows in sorted order
+            rows.forEach(row => {
+                tbody.appendChild(row);
+            });
+
+            // Put no results block back at the end
+            if (noResults) {
+                tbody.appendChild(noResults);
+            }
+        }
+    }
+</script>
+
+<style>
+    /* CSS specific to admin interface tabs */
+    .admin-tab-content {
+        display: none;
+    }
+    .admin-tab-content.active {
+        display: block;
+        animation: slideUpFade 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+</style>
+{% endblock %}

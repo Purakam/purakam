@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="fade-in">
+    <div style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>Partner Control Panel</h2>
+            <p style="color: var(--text-secondary);">Manage availability, accept incoming service requests, and track payouts</p>
+        </div>
+        
+        <!-- Online Badge Widget -->
+        <div style="display: flex; align-items: center; gap: 0.6rem; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); padding: 0.5rem 1rem; border-radius: 20px;">
+            <i data-lucide="check-circle-2" style="width: 16px; height: 16px; color: #22c55e;"></i>
+            <strong style="color: #22c55e; font-size: 0.9rem;">Online & Active</strong>
+        </div>
+    </div>
+
+
+
+    <!-- Quick Stats Cards Row -->
+    <div class="dashboard-grid">
+        <div class="dashboard-stat-card scroll-reveal">
+            <div class="stat-icon success"><i data-lucide="indian-rupee"></i></div>
+            <div class="stat-data">
+                <!-- Sum earnings from completed bookings -->
+                {% set earnings = namespace(value=0) %}
+                {% set completed_jobs = namespace(value=0) %}
+                {% for b in bookings %}
+                    {% if b.status == 'completed' %}
+                        {% set earnings.value = earnings.value + b.price %}
+                        {% set completed_jobs.value = completed_jobs.value + 1 %}
+                    {% endif %}
+                {% endfor %}
+                <h3>₹{{ earnings.value | int }}</h3>
+                <p>Total Earnings</p>
+            </div>
+        </div>
+        
+        <div class="dashboard-stat-card scroll-reveal">
+            <div class="stat-icon"><i data-lucide="check-square"></i></div>
+            <div class="stat-data">
+                <h3>{{ completed_jobs.value }}</h3>
+                <p>Completed Tasks</p>
+            </div>
+        </div>
+
+        <div class="dashboard-stat-card scroll-reveal">
+            <div class="stat-icon warning">
+                <i data-lucide="star"></i>
+            </div>
+            <div class="stat-data">
+                <h3>4.8★</h3>
+                <p>Average Rating</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="partner-container">
+        <!-- LEFT: Active Jobs & Earnings Graph -->
+        <div>
+            <!-- Active Jobs -->
+            <div class="glass-card scroll-reveal" style="margin-bottom: 2rem;">
+                <h3 style="margin-bottom: 1.5rem;"><i data-lucide="pocket-knife" style="color: var(--primary); vertical-align: middle;"></i> Assigned Jobs In-Progress</h3>
+                
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    {% set active_jobs = namespace(has=false) %}
+                    {% for b in bookings %}
+                        {% if b.status in ['accepted', 'on_the_way', 'in_progress'] %}
+                            {% set active_jobs.has = true %}
+                            <div style="padding: 1.2rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); display: flex; justify-content: space-between; align-items: center;" class="fade-in">
+                                <div>
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                        <strong style="font-size: 1.05rem;">Booking #SRV{{ b.id }}</strong>
+                                        <span class="status-badge badge-{{ b.status }}" style="font-size: 0.7rem; padding: 0.1rem 0.5rem;">{{ b.status | replace('_', ' ') }}</span>
+                                    </div>
+                                    <p style="font-size: 0.85rem; color: var(--text-secondary);"><i data-lucide="map-pin" style="width: 14px; vertical-align: middle;"></i> Address: {{ b.address }}</p>
+                                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.2rem;"><i data-lucide="calendar" style="width: 14px; vertical-align: middle;"></i> Time: {{ b.booking_date }} at {{ b.time_slot }}</p>
+                                    {% if b.details %}
+                                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; border-left: 2px solid var(--primary); padding-left: 0.5rem; font-style: italic;">"{{ b.details }}"</p>
+                                    {% endif %}
+                                    {% if b.attachment_path %}
+                                        <div style="margin-top: 0.8rem; background: rgba(255,255,255,0.02); padding: 0.8rem; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); max-width: 320px;">
+                                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.4rem;"><i data-lucide="paperclip" style="width: 12px; vertical-align: middle;"></i> Problem Attachments:</p>
+                                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 0.5rem; margin-top: 0.3rem;">
+                                            {% for img in b.attachment_path.split(',') %}
+                                                {% if img.endswith(('.mp4', '.mov', '.webm')) %}
+                                                    <video src="{{ BACKEND_BASE_URL }}/uploads/{{ img }}" controls style="width: 100%; border-radius: 4px; max-height: 80px; background: black; outline: none;"></video>
+                                                {% else %}
+                                                    <img src="{{ BACKEND_BASE_URL }}/uploads/{{ img }}" style="width: 100%; border-radius: 4px; max-height: 80px; object-fit: cover; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+                                                {% endif %}
+                                            {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                <div style="text-align: right; display: flex; flex-direction: column; gap: 0.8rem; align-items: flex-end;">
+                                    <div style="font-size: 1.15rem; font-weight: 700; color: var(--success); display: flex; align-items: center; gap: 0.8rem;">
+                                        <button class="chat-launcher-btn" onclick="openChatDrawer({{ b.id }}, '{{ b.customer.name }}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem; border-radius: var(--border-radius-sm);">
+                                            <i data-lucide="message-square" style="width: 14px; height: 14px;"></i> Chat
+                                        </button>
+                                        <span>₹{{ b.price | int }}</span>
+                                    </div>
+                                    
+                                    {% if b.status == 'accepted' %}
+                                        <button onclick="progressJob({{ b.id }}, 'accepted')" class="btn-primary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                                            Start Travel <i data-lucide="milestone"></i>
+                                        </button>
+                                    {% elif b.status == 'on_the_way' %}
+                                        <div style="display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-end;">
+                                            <input type="text" id="otp-input-{{ b.id }}" placeholder="Enter customer OTP" 
+                                                   style="width: 140px; font-size: 0.8rem; padding: 0.4rem 0.6rem; text-align: center; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); background: rgba(0, 0, 0, 0.05); color: var(--text-primary); font-family: monospace;" 
+                                                   maxlength="6">
+                                            <button onclick="verifyJobOtp({{ b.id }})" class="btn-primary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem; width: 140px; justify-content: center;">
+                                                Start Work <i data-lucide="hammer"></i>
+                                            </button>
+                                        </div>
+                                    {% elif b.status == 'in_progress' %}
+                                        <button onclick="progressJob({{ b.id }}, 'in_progress')" class="btn-primary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                                            Mark Completed <i data-lucide="check-circle-2"></i>
+                                        </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    {% if not active_jobs.has %}
+                        <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                            <i data-lucide="smile" style="width: 48px; height: 48px; margin: 0 auto 0.5rem auto; display: block;"></i>
+                            <p>No active jobs. Toggle Online and accept incoming requests.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Earnings Chart Analytics -->
+            <div class="glass-card scroll-reveal">
+                <h3><i data-lucide="trending-up" style="color: var(--primary); vertical-align: middle;"></i> Weekly Payout Trends</h3>
+                
+                <div class="earnings-chart-container">
+                    <svg class="chart-svg" viewBox="0 0 500 150">
+                        <defs>
+                            <linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#ffffff" />
+                                <stop offset="100%" stop-color="#515156" />
+                            </linearGradient>
+                            <linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#000000" stop-opacity="0.1" />
+                                <stop offset="100%" stop-color="#fcfcfd" stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <!-- Grid lines -->
+                        <line x1="0" y1="25" x2="500" y2="25" class="chart-grid-line" />
+                        <line x1="0" y1="75" x2="500" y2="75" class="chart-grid-line" />
+                        <line x1="0" y1="125" x2="500" y2="125" class="chart-grid-line" />
+                        <!-- Area -->
+                        <path d="M 0 120 Q 80 50 160 80 T 320 30 T 500 10 L 500 150 L 0 150 Z" class="chart-area" />
+                        <!-- Line -->
+                        <path d="M 0 120 Q 80 50 160 80 T 320 30 T 500 10" class="chart-line" />
+                    </svg>
+                    
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; padding: 0 0.5rem;">
+                        <span>Mon (18th)</span>
+                        <span>Wed (20th)</span>
+                        <span>Fri (22nd)</span>
+                        <span>Today</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Incoming Available Jobs Feed -->
+        <aside>
+            <div class="glass-card scroll-reveal" style="padding: 1.5rem;">
+                <h3 style="margin-bottom: 0.5rem; font-size: 1.15rem; display: flex; align-items: center; gap: 0.4rem;">
+                    <i data-lucide="bell" class="pulse" style="color: var(--warning); width: 18px;"></i> Incoming Requests
+                </h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">Jobs matching your specialty waiting for partner acceptance:</p>
+                
+                <!-- Filter Controls for Feed -->
+                <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-glass);">
+                    <div style="position: relative; width: 100%;">
+                        <i data-lucide="search" style="position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-muted);"></i>
+                        <input type="text" id="job-search" placeholder="Search by Area or Address..." class="form-input" style="padding-left: 2.2rem; font-size: 0.8rem; padding-top: 0.4rem; padding-bottom: 0.4rem; width: 100%;" oninput="applyJobFilters()">
+                    </div>
+                    <div style="width: 100%;">
+                        <select id="job-sort" class="filter-select" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; border-radius: var(--border-radius-sm); border: 1px solid var(--border-glass); background: var(--bg-main); color: var(--text-primary); cursor: pointer; width: 100%;" onchange="applyJobFilters()">
+                            <option value="default">Default Order</option>
+                            <option value="price-desc">Price: High to Low</option>
+                            <option value="price-asc">Price: Low to High</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="incoming-jobs-list" style="display: flex; flex-direction: column; gap: 1.2rem;">
+                    {% for job in incoming_jobs %}
+                        <div id="incoming-job-card-{{ job.id }}" class="incoming-job-card fade-in" data-price="{{ job.price }}" data-date="{{ job.created_at }}" data-searchable="{{ job.address.lower() }} {% if job.area_name %}{{ job.area_name.lower() }}{% endif %}" style="padding: 1.2rem; background: var(--bg-surface); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); display: flex; flex-direction: column; gap: 0.8rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <strong style="font-size: 1rem;">Job #SRV{{ job.id }}</strong>
+                                <span style="font-weight: 700; color: var(--accent); font-size: 1.1rem;">₹{{ job.price | int }}</span>
+                            </div>
+                            
+                            <div>
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem;"><i data-lucide="map-pin" style="width: 12px; vertical-align: middle; margin-right: 4px;"></i> <strong>Address:</strong> {{ job.address }}</p>
+                                {% if job.area_name %}
+                                    <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem;"><i data-lucide="compass" style="width: 12px; vertical-align: middle; margin-right: 4px;"></i> <strong>Service Area:</strong> {{ job.area_name }}</p>
+                                {% endif %}
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem;"><i data-lucide="calendar" style="width: 12px; vertical-align: middle; margin-right: 4px;"></i> <strong>Schedule:</strong> {{ job.booking_date }} at {{ job.time_slot }}</p>
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem;"><i data-lucide="clock" style="width: 12px; vertical-align: middle; margin-right: 4px;"></i> <strong>Requested At:</strong> {{ job.created_at | replace('T', ' ') | slice(0, 16) }}</p>
+                            </div>
+                            
+                            {% if job.details %}
+                                <div style="background: rgba(0, 0, 0, 0.02); padding: 0.6rem; border-left: 2px solid var(--primary); border-radius: 2px; font-size: 0.8rem; color: var(--text-secondary); font-style: italic;">
+                                    "{{ job.details }}"
+                                </div>
+                            {% endif %}
+                            
+                            {% if job.attachment_path %}
+                                <div style="background: rgba(255,255,255,0.02); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-glass); max-width: 100%;">
+                                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem;">Problem Attachments:</p>
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 0.4rem;">
+                                    {% for img in job.attachment_path.split(',') %}
+                                        {% if img.endswith(('.mp4', '.mov', '.webm')) %}
+                                            <video src="{{ BACKEND_BASE_URL }}/uploads/{{ img }}" controls style="width: 100%; border-radius: 4px; max-height: 70px; background: black; outline: none;"></video>
+                                        {% else %}
+                                            <img src="{{ BACKEND_BASE_URL }}/uploads/{{ img }}" style="width: 100%; border-radius: 4px; max-height: 70px; object-fit: cover; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+                                        {% endif %}
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                            
+                            <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem;">
+                                <button onclick="declineJob({{ job.id }})" class="btn-secondary" style="flex: 1; justify-content: center; font-size: 0.8rem; padding: 0.4rem 0.8rem; color: var(--danger); border-color: rgba(239, 68, 68, 0.2);">
+                                    Decline <i data-lucide="x"></i>
+                                </button>
+                                <button onclick="acceptJob({{ job.id }})" class="btn-primary" style="flex: 1.5; justify-content: center; font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                                    Accept Job <i data-lucide="check"></i>
+                                </button>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">
+                            <i data-lucide="bell-off" style="width: 32px; height: 32px; margin: 0 auto 0.5rem auto; display: block; opacity: 0.5;"></i>
+                            <p style="font-size: 0.85rem;">No unassigned service requests in your queue.</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </aside>
+    </div>
+</div>
+
+<script>
+    // Start background location updates if partner has active assigned jobs
+    document.addEventListener("DOMContentLoaded", () => {
+        const hasActiveJobs = {{ 'true' if active_jobs.has else 'false' }};
+        if (hasActiveJobs) {
+            console.log("Active jobs found. Starting background location reporting...");
+            
+            const reportLocation = () => {
+                if (!navigator.geolocation) {
+                    console.log("Geolocation not supported by this browser.");
+                    return;
+                }
+                navigator.geolocation.getCurrentPosition(
+                    async (position) => {
+                        const payload = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        };
+                        try {
+                            const response = await fetch(`${window.BACKEND_API_URL}/partner/location`, {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${window.userSession.authToken}`
+                                },
+                                body: JSON.stringify(payload)
+                            });
+                            if (!response.ok) {
+                                console.error("Failed to report location:", response.statusText);
+                            } else {
+                                console.log("Location reported successfully:", payload);
+                            }
+                        } catch (err) {
+                            console.error("Error reporting location:", err);
+                        }
+                    },
+                    (error) => {
+                        console.error("Error getting location for reporting:", error);
+                    },
+                    { timeout: 8000 }
+                );
+            };
+            
+            // Report immediately and then every 8 seconds
+            reportLocation();
+            const locationInterval = setInterval(reportLocation, 8000);
+            
+            // Clean up interval if needed
+            window.addEventListener("beforeunload", () => {
+                clearInterval(locationInterval);
+            });
+        }
+    });
+
+    // Client-Side Job Filters & Sorting
+    function applyJobFilters() {
+        const query = document.getElementById("job-search").value.toLowerCase().trim();
+        const sortOption = document.getElementById("job-sort").value;
+        const listContainer = document.getElementById("incoming-jobs-list");
+        const cards = Array.from(listContainer.querySelectorAll(".incoming-job-card"));
+        
+        let visibleCount = 0;
+        
+        cards.forEach(card => {
+            const searchable = card.dataset.searchable.toLowerCase();
+            const matchesSearch = searchable.includes(query);
+            
+            if (matchesSearch) {
+                card.style.display = "flex";
+                visibleCount++;
+            } else {
+                card.style.display = "none";
+            }
+        });
+        
+        // Handle no results display
+        let noResults = document.getElementById("no-jobs-filter-results");
+        if (visibleCount === 0) {
+            if (!noResults && listContainer) {
+                noResults = document.createElement("div");
+                noResults.id = "no-jobs-filter-results";
+                noResults.style.textAlign = "center";
+                noResults.style.color = "var(--text-muted)";
+                noResults.style.padding = "2rem 1rem";
+                noResults.innerHTML = `
+                    <i data-lucide="bell-off" style="width: 32px; height: 32px; margin: 0 auto 0.5rem auto; display: block; opacity: 0.5;"></i>
+                    <p style="font-size: 0.85rem;">No matching jobs found in queue.</p>
+                `;
+                listContainer.appendChild(noResults);
+                if (window.lucide) lucide.createIcons();
+            } else if (noResults) {
+                noResults.style.display = "block";
+            }
+        } else if (noResults) {
+            noResults.style.display = "none";
+        }
+        
+        // Sorting Logic
+        if (sortOption !== "default") {
+            cards.sort((a, b) => {
+                const priceA = parseFloat(a.dataset.price);
+                const priceB = parseFloat(b.dataset.price);
+                
+                if (sortOption === "price-desc") {
+                    return priceB - priceA;
+                } else if (sortOption === "price-asc") {
+                    return priceA - priceB;
+                }
+                return 0;
+            });
+            
+            // Re-append sorted cards in order
+            cards.forEach(card => {
+                listContainer.appendChild(card);
+            });
+            
+            // Put no results block back at the end
+            if (noResults) {
+                listContainer.appendChild(noResults);
+            }
+        }
+    }
+</script>
+{% endblock %}

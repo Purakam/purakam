@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>purakam - Connect to Trusted Local Services</title>
+
+    <!-- Google Fonts: Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Link Lucide Icons & Socket.IO Client -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+</head>
+<body>
+    <!-- Scroll Progress Indicator -->
+    <div class="scroll-progress" id="scroll-progress-bar"></div>
+
+    <!-- Navbar -->
+    <header class="navbar-container">
+        <div class="navbar-wrapper">
+            <a href="{{ url_for('index') }}" class="logo">
+                <i data-lucide="shield-check" class="logo-icon"></i>
+                <span>purakam</span>
+            </a>
+            
+            <div class="navbar-actions-mobile">
+                {% if not session.get('user_id') %}
+                    <a href="{{ url_for('login') }}" class="btn-login-mobile">Login</a>
+                {% endif %}
+                <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle Menu">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+            
+            <nav class="nav-links" id="nav-links">
+                {% if session.get('user_role') != 'partner' %}
+                    <a href="{{ url_for('services') }}" class="nav-link"><i data-lucide="search"></i> Find Services</a>
+                {% endif %}
+                {% if session.get('user_id') %}
+                    {% if session.get('user_role') == 'partner' %}
+                        <a href="{{ url_for('partner_dashboard') }}" class="nav-link highlight-partner"><i data-lucide="briefcase"></i> Partner Dashboard</a>
+                    {% elif session.get('user_role') == 'admin' %}
+                        <a href="{{ url_for('admin_dashboard') }}" class="nav-link highlight-partner"><i data-lucide="sliders"></i> Admin Dashboard</a>
+                    {% else %}
+                        <a href="{{ url_for('dashboard') }}" class="nav-link"><i data-lucide="calendar"></i> My Bookings</a>
+                    {% endif %}
+                    <span class="user-pill">
+                        <i data-lucide="user"></i>
+                        <span>{{ session.get('user_name') }}</span>
+                        <span class="role-badge">{{ session.get('user_role') | capitalize }}</span>
+                    </span>
+                    <a href="{{ url_for('logout') }}" class="btn-logout"><i data-lucide="log-out"></i> Logout</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="nav-link"><i data-lucide="log-in"></i> Login</a>
+                    <a href="{{ url_for('register') }}" class="btn-primary">Register</a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+
+    <!-- Alert / Flash Messages -->
+    <div class="flash-messages-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="toast toast-{{ category }} fade-in">
+                        <i data-lucide="{% if category == 'success' %}check-circle{% elif category == 'danger' %}alert-circle{% else %}info{% endif %}"></i>
+                        <span>{{ message }}</span>
+                        <button onclick="this.parentElement.remove()" class="toast-close-btn">&times;</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Main Content -->
+    <main class="main-wrapper">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Toast Notifications (JS Generated) -->
+    <div id="toast-wrapper"></div>
+
+    <!-- Footer -->
+    <footer class="footer-container">
+        <div class="footer-wrapper">
+            <div class="footer-brand">
+                <a href="{{ url_for('index') }}" class="logo">
+                    <i data-lucide="shield-check" class="logo-icon"></i>
+                    <span>purakam</span>
+                </a>
+                <p class="footer-desc">On-demand household services delivered safely and professionally at your doorstep. Verified partners, upfront pricing.</p>
+                <div class="footer-socials">
+                    <a href="#" class="social-link" aria-label="Twitter"><i data-lucide="twitter"></i></a>
+                    <a href="#" class="social-link" aria-label="Instagram"><i data-lucide="instagram"></i></a>
+                    <a href="#" class="social-link" aria-label="LinkedIn"><i data-lucide="linkedin"></i></a>
+                </div>
+            </div>
+            
+            <div class="footer-links-col">
+                <h4>Quick Links</h4>
+                <ul class="footer-links-list">
+                    <li><a href="{{ url_for('services') }}"><i data-lucide="chevron-right"></i> All Services</a></li>
+                    <li><a href="{{ url_for('services', category='Electrician') }}"><i data-lucide="chevron-right"></i> Electrician</a></li>
+                    <li><a href="{{ url_for('services', category='Switchboard & Wiring') }}"><i data-lucide="chevron-right"></i> Wiring Repair</a></li>
+                    <li><a href="{{ url_for('services', category='AC & Appliance Repair') }}"><i data-lucide="chevron-right"></i> AC Service</a></li>
+                </ul>
+            </div>
+            
+            <div class="footer-info-col">
+                <h4>Presence</h4>
+                <div style="font-size: 0.95rem; font-weight: 600; color: #ffffff; margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.4rem;">
+                    <i data-lucide="map-pin" style="width: 14px; height: 14px; color: var(--primary);"></i> Mumbai
+                </div>
+                <div class="presence-tags">
+                    <span class="presence-tag">Bandra</span>
+                    <span class="presence-tag">Andheri</span>
+                    <span class="presence-tag">Colaba</span>
+                    <span class="presence-tag">Juhu</span>
+                    <span class="presence-tag">Worli</span>
+                    <span class="presence-tag">Powai</span>
+                </div>
+                <div class="footer-contact">
+                    <a href="mailto:support@purakam.in" class="contact-link"><i data-lucide="mail"></i> support@purakam.in</a>
+                    <a href="tel:+919999000099" class="contact-link"><i data-lucide="phone"></i> +91 9999 0000 99</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer-bottom">
+            <div class="footer-bottom-wrapper">
+                <p class="copyright">&copy; 2026 purakam India Private Limited. All rights reserved.</p>
+                <div class="footer-legal-links">
+                    <a href="#">Privacy Policy</a>
+                    <span class="divider">•</span>
+                    <a href="#">Terms of Service</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Chat Drawer (Global) -->
+    <div id="chat-drawer-backdrop" class="chat-drawer-backdrop" onclick="closeChatDrawer()"></div>
+    <div id="chat-drawer" class="chat-drawer">
+        <div class="chat-drawer-header">
+            <h3><i data-lucide="message-square"></i> Chat System</h3>
+            <button class="chat-drawer-close-btn" onclick="closeChatDrawer()">&times;</button>
+        </div>
+        <div id="chat-messages-container" class="chat-messages-container">
+            <!-- Dynamically populated messages -->
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="chat-message-input" class="chat-input" placeholder="Type a message..." onkeydown="if(event.key === 'Enter') sendChatMessage()">
+            <button class="chat-send-btn" onclick="sendChatMessage()">
+                <i data-lucide="send"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Inject Session variables for JS consumption -->
+    <script>
+        window.BACKEND_API_URL = "{{ BACKEND_API_URL }}";
+        window.userSession = {
+            userId: "{{ session.get('user_id', '') }}",
+            userName: "{{ session.get('user_name', '') }}",
+            userRole: "{{ session.get('user_role', '') }}",
+            authToken: "{{ session.get('auth_token', '') }}"
+        };
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
