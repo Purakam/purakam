@@ -26,6 +26,7 @@ import {
 } from '../constants/booking';
 import { useTheme, SIZES, SHADOW } from '../theme';
 import { useNotificationStore } from '../stores/notificationStore';
+import { payForBooking } from '../utils/razorpayPayment';
 
 const UPI_HANDLES = {
   // Banks
@@ -373,12 +374,13 @@ export default function BookingScreen({ route, navigation }) {
 
     try {
       const coords = await getCoordinates();
-      await createBooking({
+      // The price shown on screen is only an estimate: the server works out
+      // the real amount itself, so none is sent here.
+      const booking = await createBooking({
         service_category: categoryName,
         booking_date: bookingDate,
         time_slot: timeSlot,
         details: details || null,
-        price: totalPrice,
         address,
         payment_method: paymentMethod,
         pincode,
@@ -388,6 +390,24 @@ export default function BookingScreen({ route, navigation }) {
         longitude: coords.longitude,
         partner_id: null,
       });
+
+      // Online payments are taken up front. If the person closes the payment
+      // sheet or it fails, the booking still exists (unpaid) and can be paid
+      // from My Bookings with "Pay Now" - nothing is lost or duplicated.
+      if (paymentMethod === 'UPI') {
+        const result = await payForBooking(booking, user);
+        if (!result.success) {
+          showToast(
+            result.cancelled ? 'warning' : 'error',
+            result.cancelled ? 'Payment Not Completed' : 'Payment Issue',
+            result.cancelled
+              ? 'Your booking is saved. You can pay any time from My Bookings.'
+              : result.message
+          );
+          navigation.navigate('CustomerTabs', { screen: 'Bookings' });
+          return;
+        }
+      }
 
       const showSuccessModal = useNotificationStore.getState().showSuccessModal;
       showSuccessModal(

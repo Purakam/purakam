@@ -14,6 +14,12 @@ export const verifyEmail = (email, code) =>
 export const resendVerification = (email) =>
   apiClient.post('/auth/resend-verification', { email }).then((r) => r.data);
 
+export const forgotPassword = (email) =>
+  apiClient.post('/auth/forgot-password', { email }).then((r) => r.data);
+
+export const resetPassword = (email, code, newPassword) =>
+  apiClient.post('/auth/reset-password', { email, code, new_password: newPassword }).then((r) => r.data);
+
 // payload: { access_token } in production (verified by the backend with Google),
 // or { email, name } for the development-only mock flow.
 export const googleLogin = (payload) =>
@@ -21,6 +27,3 @@ export const googleLogin = (payload) =>
 
 export const updateProfile = (payload) =>
   apiClient.put('/users/me', payload).then((r) => r.data);
-
-
-

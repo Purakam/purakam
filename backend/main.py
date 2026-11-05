@@ -2,9 +2,11 @@ import os
 import random
 import secrets
 import hmac
+import json
+import hashlib
 import razorpay
 import requests
-from fastapi import FastAPI, Depends, HTTPException, status, Header, File, UploadFile, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, Header, File, UploadFile, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -21,12 +23,13 @@ from datetime import datetime, timedelta, timezone
 
 from . import database, schemas
 from .database import (
-    get_db, User, PartnerProfile, ServiceCategory, Booking, Review, ChatMessage,
+    get_db, SessionLocal, User, PartnerProfile, ServiceCategory, Booking, Review, ChatMessage,
     PartnerDeclinedBooking, hash_password, verify_password, password_needs_rehash,
 )
 
 import math
 from jose import jwt, JWTError
+from .ratelimit import RateLimiter
 
 # Render sets RENDER=true; APP_ENV=production works anywhere else.
 IS_PRODUCTION = bool(os.environ.get("RENDER")) or os.environ.get("APP_ENV", "").lower() == "production"
@@ -265,12 +268,27 @@ sio = socketio.AsyncServer(
     logger=False,
     engineio_logger=False
 )
-sio_app = socketio.ASGIApp(sio, socketio_path="socket.io")
-app.mount("/ws", sio_app)
+#
+# IMPORTANT: Socket.IO is combined with the FastAPI app at the very bottom of
+# this file (search for "fastapi_app = app"), not mounted with app.mount()
+# here. python-socketio's own path matching inspects the raw ASGI `path`,
+# which newer versions of Starlette no longer rewrite on app.mount() (they use
+# `root_path` instead) - so mounting it the old way made EVERY WebSocket
+# connection, including legitimate ones from our own frontend, get
+# misrouted into python-engineio's 404 handler, which replies with an
+# invalid (non-WebSocket) ASGI message and crashes the server. Wrapping
+# FastAPI inside Socket.IO's ASGI app instead avoids the mismatch entirely:
+# see the bottom of this file for exactly how `app` gets reassigned.
+#
 
 
 @sio.event
 async def connect(sid, environ, auth=None):
+    # A valid access token is required to connect at all: nothing in this app
+    # has a legitimate reason for an anonymous realtime connection, and
+    # requiring auth here (rather than only when joining a room) means a
+    # socket can never exist in a state where it's connected but unverified.
+    # Returning False from a Socket.IO connect handler rejects the connection.
     token = None
     if auth and isinstance(auth, dict):
         token = auth.get("token")
@@ -279,45 +297,181 @@ async def connect(sid, environ, auth=None):
         qs = parse_qs(environ.get("QUERY_STRING", ""))
         if "token" in qs:
             token = qs["token"][0]
-            
-    if token:
-        payload = verify_token(token)
-        if payload:
-            user_id = payload.get("user_id")
-            role = payload.get("role")
-            if user_id:
-                await sio.save_session(sid, {"user_id": user_id, "role": role})
-                await sio.enter_room(sid, f"user_{user_id}")
-                if role == "partner":
-                    await sio.enter_room(sid, "partners")
+
+    if not token:
+        return False
+
+    payload = verify_token(token)
+    if not payload or not payload.get("user_id"):
+        return False
+
+    user_id = payload["user_id"]
+    role = payload.get("role")
+
+    # Confirm the user still exists and the token's role claim hasn't gone
+    # stale (e.g. an admin demoted after the token was issued).
+    category = None
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or user.is_verified is False:
+            return False
+        role = user.role
+        if role == "partner":
+            profile = db.query(PartnerProfile).filter(PartnerProfile.user_id == user_id).first()
+            category = profile.service_category if profile else None
+    finally:
+        db.close()
+
+    await _capture_event_loop()  # also captured at startup; this is a safety net
+    await sio.save_session(sid, {"user_id": user_id, "role": role})
+    await sio.enter_room(sid, f"user_{user_id}")
+    if category:
+        await sio.enter_room(sid, partner_room(category))
 
 @sio.event
 async def join_booking_room(sid, data):
-    if isinstance(data, dict):
-        booking_id = data.get("booking_id")
-        if booking_id:
-            await sio.enter_room(sid, f"booking_{booking_id}")
+    # connect() now rejects any unauthenticated socket, so a session always
+    # exists here - but check defensively rather than assume.
+    session = await sio.get_session(sid)
+    if not session or not session.get("user_id"):
+        return {"ok": False, "error": "Not authenticated"}
+
+    if not isinstance(data, dict) or not data.get("booking_id"):
+        return {"ok": False, "error": "booking_id is required"}
+
+    try:
+        booking_id = int(data["booking_id"])
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Invalid booking_id"}
+
+    user_id = session["user_id"]
+    role = session.get("role")
+
+    db = SessionLocal()
+    try:
+        booking = db.query(Booking).filter(Booking.id == booking_id).first()
+        if not booking:
+            return {"ok": False, "error": "Booking not found"}
+        # Only the booking's own customer or assigned partner may listen to
+        # its room (chat, live tracking, status updates); admins can too, for
+        # support/oversight. Anyone else - including a partner who merely
+        # declined or never saw this booking - is refused, which is exactly
+        # the gap that let any connected client listen to any booking by
+        # guessing its (sequential, easily-enumerable) id.
+        if booking.customer_id != user_id and booking.partner_id != user_id and role != "admin":
+            return {"ok": False, "error": "Not authorized for this booking"}
+    finally:
+        db.close()
+
+    await sio.enter_room(sid, f"booking_{booking_id}")
+    return {"ok": True}
 
 @sio.event
 async def disconnect(sid):
     pass
 
-def emit_realtime_event(event_name: str, payload: dict, room: str = None):
-    """Safely emit socket events from sync route handlers to connected Web & Mobile apps."""
+# The event loop the Socket.IO server runs on, captured at startup (see the
+# on_startup hook where `app` is assembled at the bottom of this file). Route
+# handlers here are plain `def` functions, which FastAPI runs in worker
+# threads that have no event loop of their own - so they can't just call
+# asyncio.get_event_loop() and emit. Hand each emit over to the server's real
+# loop instead, which is the thread-safe way to do it.
+_main_loop = None
+
+async def _capture_event_loop():
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
+
+def _log_emit_failure(future):
+    if future.cancelled():
+        return
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                sio.emit(event_name, payload, room=room), loop
-            )
+        future.result()
+    except Exception as e:
+        print(f"Socket emit failed: {e}")
+
+def emit_realtime_event(event_name: str, payload: dict, room: str = None):
+    """Emit a socket event from a sync route handler to connected web & mobile apps."""
+    loop = _main_loop
+    if loop is None or loop.is_closed():
+        # Server hasn't started its loop yet, so no socket can be connected.
+        return
+    try:
+        future = asyncio.run_coroutine_threadsafe(sio.emit(event_name, payload, room=room), loop)
+        future.add_done_callback(_log_emit_failure)
     except Exception as e:
         print(f"Socket emit note: {e}")
+
+def partner_room(category: str) -> str:
+    """Room for partners of one service category, so a new job is only
+    announced to partners who could actually take it. (Membership is set when
+    a partner connects, so a category change applies on their next connection.)"""
+    return f"partners:{(category or '').strip().lower()}"
+
+def notify_booking_changed(booking):
+    """Tell both people on a booking that it changed. Only the customer's copy
+    carries the work OTP - the partner must get it from the customer, so it must
+    never reach the partner's socket."""
+    base = {
+        "booking_id": booking.id,
+        "status": booking.status,
+        "partner_id": booking.partner_id,
+        "payment_status": booking.payment_status,
+    }
+    emit_realtime_event("booking_updated", {**base, "otp": booking.otp}, room=f"user_{booking.customer_id}")
+    if booking.partner_id:
+        emit_realtime_event("booking_updated", base, room=f"user_{booking.partner_id}")
 
 
 
 # Setup upload directory
 UPLOAD_DIR = "backend/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Upload limits. A request is rejected up front if it declares a body larger
+# than MAX_UPLOAD_REQUEST_BYTES, and each file is also counted as it is read,
+# so neither a lying client nor a missing Content-Length can push the server
+# into holding or storing something huge.
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_FILES_PER_REQUEST = 8
+MAX_ATTACHMENTS_PER_BOOKING = 15
+MAX_UPLOAD_REQUEST_BYTES = 120 * 1024 * 1024
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+def detect_media_extensions(header: bytes):
+    """What a file really is, judged by its first bytes rather than its name.
+    Returns the set of extensions that legitimately hold that format, or None
+    if it isn't an allowed image/video at all."""
+    if header.startswith(b"\xff\xd8\xff"):
+        return {".jpg", ".jpeg"}
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return {".png"}
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return {".gif"}
+    if header[4:8] in (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"):
+        return {".mp4", ".mov"}
+    if header.startswith(b"RIFF") and header[8:12] == b"AVI ":
+        return {".avi"}
+    if header.startswith(b"\x1a\x45\xdf\xa3"):
+        return {".mkv", ".webm"}
+    return None
+
+@app.middleware("http")
+async def security_headers_and_upload_cap(request: Request, call_next):
+    # Turn away an oversized upload before its body is read at all.
+    if request.method == "POST" and request.url.path.startswith("/api/bookings/") and request.url.path.endswith("/upload"):
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_REQUEST_BYTES:
+            return JSONResponse(status_code=413, content={"detail": "Upload is too large."})
+    response = await call_next(request)
+    # Browsers must trust the declared type of what we serve (notably uploads),
+    # never guess it from the content.
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 # Enable CORS for frontend communication
 app.add_middleware(
@@ -379,6 +533,33 @@ def test_smtp(admin_id: int = Depends(get_current_admin_id)):
 
 # === Auth Routes ===
 
+# --- Brute-force protection ------------------------------------------------
+# Limits are keyed on the ACCOUNT (the email), not on the caller's IP address:
+# the web app reaches this API through its own Flask server, so every web user
+# arrives from the same address, and a forwarded client IP can be faked by the
+# caller - an IP-based limit here would either lock everyone out together or be
+# trivial to dodge. Per-account limits behave the same for web and mobile and
+# can't be spoofed.
+rate_limiter = RateLimiter()
+LOGIN_MAX_FAILURES = 8
+LOGIN_WINDOW_SECONDS = 15 * 60
+REGISTER_MAX_PER_EMAIL = 5          # sign-up attempts per email per hour
+REGISTER_WINDOW_SECONDS = 60 * 60
+CODE_ISSUE_MAX = 5                  # emailed codes per email per hour, per purpose
+CODE_ISSUE_WINDOW_SECONDS = 60 * 60
+
+# Checked against when the email doesn't exist, so "no such account" costs the
+# same time as "wrong password" and response timing can't reveal which emails
+# are registered.
+_DUMMY_PASSWORD_HASH = hash_password("not-a-real-password")
+
+def too_many_requests(wait_seconds: int, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=message,
+        headers={"Retry-After": str(wait_seconds)},
+    )
+
 OTP_TTL_MINUTES = 15
 OTP_RESEND_COOLDOWN_SECONDS = 60
 OTP_MAX_ATTEMPTS = 5
@@ -405,6 +586,10 @@ def issue_verification_code(user: User, db: Session, background_tasks: Backgroun
         sent_at = user.verification_code_expires_at - timedelta(minutes=OTP_TTL_MINUTES)
         if (now - sent_at).total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
             return False
+    # Hourly cap on emailed codes: without it, requesting a fresh code (which
+    # resets the guess counter) in a loop would give unlimited guesses over time.
+    if not force and rate_limiter.consume(f"code:verify:{normalize_email(user.email)}", CODE_ISSUE_MAX, CODE_ISSUE_WINDOW_SECONDS):
+        return False
 
     code = generate_otp()
     user.verification_code = code
@@ -466,6 +651,10 @@ def register(user_data: schemas.UserCreate, background_tasks: BackgroundTasks, d
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="PAN card must be a 10-character alphanumeric code"
             )
+
+    wait = rate_limiter.consume(f"register:{email}", REGISTER_MAX_PER_EMAIL, REGISTER_WINDOW_SECONDS)
+    if wait:
+        raise too_many_requests(wait, "Too many sign-up attempts for this email. Please try again later.")
 
     existing_user = get_user_by_email(db, email)
     if existing_user:
@@ -569,22 +758,127 @@ def resend_verification(req: schemas.ResendVerificationRequest, background_tasks
     if not user or user.is_verified is not False:
         return generic
 
-    if not issue_verification_code(user, db, background_tasks):
+    # Same answer whether or not a new code actually went out (it doesn't if one
+    # was sent under a minute ago or the hourly cap is reached). A different
+    # reply here would reveal which emails have a pending sign-up.
+    issue_verification_code(user, db, background_tasks)
+    return generic
+
+
+# --- Forgot password -----------------------------------------------------
+# Separate from the email-verification OTP above (different columns, different
+# in-memory attempt counter) so that requesting a password reset can never
+# interfere with a pending registration's verification code, or vice versa.
+RESET_TTL_MINUTES = 15
+RESET_RESEND_COOLDOWN_SECONDS = 60
+RESET_MAX_ATTEMPTS = 5
+_reset_failed_attempts: dict = {}
+
+def issue_reset_code(user: User, db: Session, background_tasks: BackgroundTasks, force: bool = False) -> bool:
+    """Create a fresh 6-digit password-reset code and email it in the background.
+
+    Returns False (and does nothing) if a code was sent less than
+    RESET_RESEND_COOLDOWN_SECONDS ago, unless force=True.
+    """
+    now = datetime.utcnow()
+    if not force and user.reset_code and user.reset_code_expires_at:
+        sent_at = user.reset_code_expires_at - timedelta(minutes=RESET_TTL_MINUTES)
+        if (now - sent_at).total_seconds() < RESET_RESEND_COOLDOWN_SECONDS:
+            return False
+    if not force and rate_limiter.consume(f"code:reset:{normalize_email(user.email)}", CODE_ISSUE_MAX, CODE_ISSUE_WINDOW_SECONDS):
+        return False
+
+    code = generate_otp()
+    user.reset_code = code
+    user.reset_code_expires_at = now + timedelta(minutes=RESET_TTL_MINUTES)
+    db.commit()
+    _reset_failed_attempts.pop(user.id, None)
+    background_tasks.add_task(send_email_otp, user.email, code)
+    return True
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(req: schemas.ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    # Always the same response, whether or not the email is registered, so this
+    # endpoint can't be used to discover which emails have accounts.
+    generic = {"message": "If an account exists for this email, a password reset code has been sent."}
+
+    user = get_user_by_email(db, req.email)
+    # An unverified account has no usable password to "forget" yet (it should
+    # finish email verification via /api/auth/resend-verification instead), so
+    # it's treated the same as a non-existent email here.
+    if not user or user.is_verified is not True:
+        return generic
+
+    # As above: identical reply whether or not a new code went out, so a
+    # "please wait" can't be used to tell real accounts from unknown emails.
+    issue_reset_code(user, db, background_tasks)
+    return generic
+
+@app.post("/api/auth/reset-password", response_model=schemas.UserResponse)
+def reset_password(req: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = get_user_by_email(db, req.email)
+    if not user or user.is_verified is not True:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset code")
+
+    if _reset_failed_attempts.get(user.id, 0) >= RESET_MAX_ATTEMPTS:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Please wait {OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another code."
+            detail="Too many incorrect attempts. Please request a new code."
         )
-    return generic
+
+    if (
+        not user.reset_code
+        or not user.reset_code_expires_at
+        or datetime.utcnow() > user.reset_code_expires_at
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset code has expired. Please request a new code."
+        )
+
+    submitted = (req.code or "").strip()
+    if not hmac.compare_digest(user.reset_code, submitted):
+        _reset_failed_attempts[user.id] = _reset_failed_attempts.get(user.id, 0) + 1
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid reset code")
+
+    # Code proven correct: set the new password and consume the code so it
+    # can't be reused, but do NOT log the user in automatically - they should
+    # confirm their new password actually works via a fresh login.
+    user.password_hash = hash_password(req.new_password)
+    user.reset_code = None
+    user.reset_code_expires_at = None
+    db.commit()
+    db.refresh(user)
+    _reset_failed_attempts.pop(user.id, None)
+    # They've just proven they own the mailbox, so don't leave them locked out
+    # of logging in with the password they just chose.
+    rate_limiter.reset(f"login:{normalize_email(user.email)}")
+    return user
 
 
 @app.post("/api/auth/login", response_model=schemas.UserResponse)
 def login(login_data: schemas.UserLogin, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    login_key = f"login:{normalize_email(login_data.email)}"
+
+    # Too many recent failures for this account: refuse outright, even for the
+    # right password, so a guesser gets no signal while locked out.
+    wait = rate_limiter.retry_after(login_key, LOGIN_MAX_FAILURES, LOGIN_WINDOW_SECONDS)
+    if wait:
+        minutes = max(1, -(-wait // 60))
+        raise too_many_requests(
+            wait,
+            f"Too many failed login attempts. Please try again in {minutes} minute{'s' if minutes != 1 else ''}, or reset your password."
+        )
+
     user = get_user_by_email(db, login_data.email)
-    if not user or not verify_password(login_data.password, user.password_hash):
+    password_ok = verify_password(login_data.password, user.password_hash if user else _DUMMY_PASSWORD_HASH)
+    if not user or not password_ok:
+        rate_limiter.hit(login_key, LOGIN_WINDOW_SECONDS)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
+    rate_limiter.reset(login_key)
 
     # Transparently upgrade legacy (global-salt) password hashes.
     if password_needs_rehash(user.password_hash):
@@ -726,7 +1020,7 @@ def get_service_categories(db: Session = Depends(get_db)):
 
 # === Partner Profile Routes ===
 
-@app.get("/api/partners", response_model=List[schemas.UserResponse])
+@app.get("/api/partners", response_model=List[schemas.PartnerListingResponse])
 def get_partners(category: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(User).filter(User.role == "partner", User.is_verified.isnot(False))
     if category:
@@ -858,6 +1152,23 @@ def create_booking(
             detail="Service is only available in Mumbai, Thane, or Navi Mumbai regions matching valid local pincodes"
         )
 
+    # The price is computed here, server-side, and the client-submitted
+    # `booking_data.price` is never read or trusted - a browser or app could
+    # otherwise set it to anything. This mirrors exactly the formula the web
+    # and mobile apps already use for their own on-screen estimate (base
+    # price + 18% GST + a flat Rs49 platform fee), so the amount actually
+    # charged matches what the person was shown; it just can no longer be
+    # tampered with in transit.
+    category = db.query(ServiceCategory).filter(ServiceCategory.name == booking_data.service_category).first()
+    if not category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid service category"
+        )
+    PLATFORM_FEE = 49.0
+    GST_RATE = 0.18
+    computed_price = round(category.base_price + (category.base_price * GST_RATE) + PLATFORM_FEE, 2)
+
     otp_code = str(random.randint(100000, 999999))
     new_booking = Booking(
         customer_id=customer_id,
@@ -866,7 +1177,7 @@ def create_booking(
         booking_date=booking_data.booking_date,
         time_slot=booking_data.time_slot,
         details=booking_data.details,
-        price=booking_data.price,
+        price=computed_price,
         status="requested",
         address=booking_data.address,
         payment_method=booking_data.payment_method,
@@ -908,7 +1219,7 @@ def create_booking(
         "created_at": new_booking.created_at.isoformat() if new_booking.created_at else None,
         "area_name": new_booking.area_name
     }
-    emit_realtime_event("new_booking_broadcast", b_dict, room="partners")
+    emit_realtime_event("new_booking_broadcast", b_dict, room=partner_room(new_booking.service_category))
     emit_realtime_event("booking_created", b_dict, room=f"user_{customer_id}")
 
     return new_booking
@@ -928,8 +1239,13 @@ def create_razorpay_order(
         raise HTTPException(status_code=403, detail="Not authorized to access this booking")
         
     amount_paise = int(booking.price * 100)
-    
-    if RAZORPAY_KEY_ID == "rzp_test_dummy_key_id":
+
+    # The mock path only exists for local development, where real Razorpay
+    # keys usually aren't configured yet. In production (IS_PRODUCTION) it's
+    # never reachable regardless of what RAZORPAY_KEY_ID happens to be set
+    # to, so a misconfigured deployment fails loudly on a real order-creation
+    # error instead of silently handing out fake "paid" bookings.
+    if not IS_PRODUCTION and RAZORPAY_KEY_ID == "rzp_test_dummy_key_id":
         mock_order_id = f"order_mock_{booking_id}_{random.randint(1000, 9999)}"
         booking.razorpay_order_id = mock_order_id
         db.commit()
@@ -970,13 +1286,19 @@ def verify_razorpay_payment(
     if booking.customer_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this booking")
         
-    if RAZORPAY_KEY_ID == "rzp_test_dummy_key_id":
+    # Same production gate as order creation above: this bypass - which does
+    # NOT cryptographically verify anything, only that the order id matches -
+    # can never run outside local development. In production, every payment
+    # is confirmed with a real HMAC-SHA256 signature check below, so a client
+    # cannot mark its own booking "paid" by sending made-up values.
+    if not IS_PRODUCTION and RAZORPAY_KEY_ID == "rzp_test_dummy_key_id":
         if verification.razorpay_order_id != booking.razorpay_order_id:
             raise HTTPException(status_code=400, detail="Invalid order ID signature")
         booking.payment_status = "completed"
         booking.razorpay_payment_id = verification.razorpay_payment_id
         booking.razorpay_signature = verification.razorpay_signature
         db.commit()
+        notify_booking_changed(booking)
         return {"status": "success", "message": "Payment verified (mocked)"}
         
     try:
@@ -991,9 +1313,77 @@ def verify_razorpay_payment(
         booking.razorpay_payment_id = verification.razorpay_payment_id
         booking.razorpay_signature = verification.razorpay_signature
         db.commit()
+        notify_booking_changed(booking)
         return {"status": "success", "message": "Payment verified successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Payment signature verification failed: {str(e)}")
+
+
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "").strip()
+
+@app.post("/api/payments/webhook")
+async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
+    """Server-to-server payment confirmation, called directly by Razorpay
+    (never by the customer's browser or app), configured in the Razorpay
+    dashboard under Settings -> Webhooks.
+
+    This is the authoritative way a payment gets marked complete: unlike
+    /verify-payment above, it doesn't depend on the customer's device
+    successfully making one more request after paying (they might close the
+    tab, lose signal, or the app might crash) - Razorpay's own servers call
+    this directly once a payment is actually captured, so a completed
+    payment is recorded even if the client-side confirmation never arrives.
+
+    There's no JWT here (Razorpay's servers aren't a logged-in user); the
+    HMAC-SHA256 signature below, computed over the exact raw request body
+    using a secret only this server and Razorpay's dashboard know, is what
+    authenticates the request instead.
+    """
+    if not RAZORPAY_WEBHOOK_SECRET:
+        # Refuse rather than silently skip verification: an unconfigured
+        # webhook secret must never be treated as "anything goes".
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+
+    body = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    event = payload.get("event")
+    if event not in ("payment.captured", "order.paid"):
+        # Razorpay sends many event types; anything we don't act on is
+        # acknowledged (200) so Razorpay doesn't keep retrying it, but
+        # otherwise ignored.
+        return {"status": "ignored", "event": event}
+
+    try:
+        entity = payload["payload"]["payment"]["entity"]
+        razorpay_order_id = entity["order_id"]
+        razorpay_payment_id = entity["id"]
+    except (KeyError, TypeError):
+        raise HTTPException(status_code=400, detail="Unexpected webhook payload shape")
+
+    booking = db.query(Booking).filter(Booking.razorpay_order_id == razorpay_order_id).first()
+    if not booking:
+        # Nothing on our side to update - acknowledge anyway so Razorpay
+        # doesn't retry indefinitely for an order it created that we somehow
+        # don't recognize.
+        return {"status": "no_matching_booking"}
+
+    if booking.payment_status != "completed":
+        booking.payment_status = "completed"
+        booking.razorpay_payment_id = razorpay_payment_id
+        db.commit()
+        notify_booking_changed(booking)
+
+    return {"status": "ok"}
+
 
 @app.get("/api/bookings", response_model=List[schemas.BookingResponse])
 def get_bookings(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
@@ -1092,6 +1482,13 @@ def decline_booking(booking_id: int, user_id: int = Depends(get_current_user_id)
         
     return {"detail": "Booking request declined successfully"}
 
+# new status -> the only current statuses it may be reached from
+PARTNER_STATUS_TRANSITIONS = {
+    "on_the_way": {"accepted"},
+    "in_progress": {"accepted", "on_the_way"},
+    "completed": {"in_progress"},
+}
+
 @app.put("/api/bookings/{booking_id}/status", response_model=schemas.BookingResponse)
 def update_booking_status(
     booking_id: int, 
@@ -1106,6 +1503,8 @@ def update_booking_status(
         
     user = db.query(User).filter(User.id == user_id).first()
     
+    previous_status = booking.status
+
     # Partner Accepting a requested booking
     if new_status == "accepted" and user.role == "partner":
         if booking.status == "accepted":
@@ -1121,8 +1520,24 @@ def update_booking_status(
         booking.partner_id = user_id
         booking.status = "accepted"
         booking.accepted_at = datetime.utcnow()
-    # General status progressions by assigned partner
+    # General status progressions by assigned partner. A job can only move
+    # forward one step at a time along accepted -> on_the_way -> in_progress
+    # -> completed (both the web and mobile apps already work this way), so
+    # a partner can't skip the customer's OTP by jumping straight to
+    # "completed", or re-complete a finished job to inflate their job count.
     elif user.role == "partner" and booking.partner_id == user_id:
+        allowed_from = PARTNER_STATUS_TRANSITIONS.get(new_status)
+        if allowed_from is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid status."
+            )
+        if booking.status not in allowed_from:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A booking that is '{booking.status}' cannot be moved to '{new_status}'."
+            )
+
         if new_status == "on_the_way":
             booking.status = new_status
         elif new_status == "in_progress":
@@ -1131,15 +1546,26 @@ def update_booking_status(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Verification OTP is required to start work."
                 )
-            if booking.otp and otp != booking.otp:
+            if booking.otp and not hmac.compare_digest(str(otp), str(booking.otp)):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid verification OTP. Please ask the customer for the correct OTP."
                 )
             booking.status = new_status
         elif new_status == "completed":
+            if booking.payment_method == "UPI":
+                # Online payments are confirmed by Razorpay (verify-payment or
+                # the webhook), never by the partner. Completing a job must not
+                # be a way to mark an unpaid online booking as paid.
+                if booking.payment_status != "completed":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="The customer's online payment has not been received yet."
+                    )
+            else:
+                # Cash on delivery: the partner collecting the cash is the payment.
+                booking.payment_status = "completed"
             booking.status = "completed"
-            booking.payment_status = "completed"  # Cash collections or UPI matches complete
             # Increment partner's completed jobs
             partner_profile = db.query(PartnerProfile).filter(PartnerProfile.user_id == user_id).first()
             if partner_profile:
@@ -1156,17 +1582,15 @@ def update_booking_status(
     db.commit()
     db.refresh(booking)
     
-    # Emit real-time WebSocket event to customer and partner rooms for zero latency
-    socket_payload = {
-        "booking_id": booking.id,
-        "status": booking.status,
-        "partner_id": booking.partner_id,
-        "otp": booking.otp
-    }
-    emit_realtime_event("booking_updated", socket_payload, room=f"user_{booking.customer_id}")
-    emit_realtime_event("otp_received", {"booking_id": booking.id, "otp": booking.otp}, room=f"user_{booking.customer_id}")
-    if booking.partner_id:
-        emit_realtime_event("booking_updated", socket_payload, room=f"user_{booking.partner_id}")
+    # Push the change to everyone it concerns, instantly.
+    notify_booking_changed(booking)
+    if new_status == "accepted":
+        # The OTP only becomes relevant to the customer once someone is on the way.
+        emit_realtime_event("job_accepted", {"booking_id": booking.id, "partner_id": booking.partner_id}, room=f"user_{booking.customer_id}")
+        emit_realtime_event("otp_received", {"booking_id": booking.id, "otp": booking.otp}, room=f"user_{booking.customer_id}")
+    if previous_status == "requested" and booking.status in ("accepted", "cancelled"):
+        # Other partners in this category are still looking at it as an open job.
+        emit_realtime_event("booking_unavailable", {"booking_id": booking.id}, room=partner_room(booking.service_category))
 
     pydantic_booking = schemas.BookingResponse.model_validate(booking)
     if user.role == "partner":
@@ -1249,27 +1673,72 @@ async def upload_booking_attachment(
         all_files.append(file)
     if files:
         all_files.extend(files)
-        
+
     if not all_files:
         raise HTTPException(status_code=400, detail="No files uploaded")
-        
+    if len(all_files) > MAX_FILES_PER_REQUEST:
+        raise HTTPException(status_code=400, detail=f"You can upload at most {MAX_FILES_PER_REQUEST} files at a time.")
+
+    existing = [x for x in (booking.attachment_path or "").split(",") if x]
+    if len(existing) + len(all_files) > MAX_ATTACHMENTS_PER_BOOKING:
+        raise HTTPException(status_code=400, detail=f"A booking can have at most {MAX_ATTACHMENTS_PER_BOOKING} attachments.")
+
     saved_filenames = []
+    saved_paths = []
+
+    def discard_saved():
+        # All-or-nothing: if any file in the batch is refused, none are kept.
+        for path in saved_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
     for f in all_files:
-        file_ext = os.path.splitext(f.filename)[1].lower()
-        if file_ext not in [".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mov", ".avi", ".mkv", ".webm"]:
-            raise HTTPException(status_code=400, detail=f"Unsupported format: {f.filename}")
-            
-        filename = f"booking_{booking_id}_{int(datetime.utcnow().timestamp())}_{random.randint(1000, 9999)}{file_ext}"
+        original_name = f.filename or ""
+        file_ext = os.path.splitext(original_name)[1].lower()
+        if file_ext not in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS:
+            discard_saved()
+            raise HTTPException(status_code=400, detail=f"Unsupported format: {original_name or 'unnamed file'}")
+
+        max_bytes = MAX_IMAGE_BYTES if file_ext in IMAGE_EXTENSIONS else MAX_VIDEO_BYTES
+
+        # Unguessable name: /uploads is served without a login, so the name
+        # itself is what keeps one customer's photos from being found by
+        # someone else (the old name was just booking id + timestamp).
+        filename = f"booking_{booking_id}_{secrets.token_urlsafe(18)}{file_ext}"
         file_path = os.path.join(UPLOAD_DIR, filename)
-        
+
+        written = 0
+        header = b""
         try:
             with open(file_path, "wb") as buffer:
-                content = await f.read()
-                buffer.write(content)
-            saved_filenames.append(filename)
+                saved_paths.append(file_path)
+                while True:
+                    chunk = await f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    if len(header) < 16:
+                        header = (header + chunk)[:16]
+                    written += len(chunk)
+                    if written > max_bytes:
+                        break
+                    buffer.write(chunk)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-            
+            discard_saved()
+            raise HTTPException(status_code=500, detail="Failed to save file")
+
+        if written > max_bytes:
+            discard_saved()
+            raise HTTPException(status_code=413, detail=f"{original_name} is too large (max {max_bytes // (1024 * 1024)} MB).")
+
+        allowed_for_content = detect_media_extensions(header)
+        if not allowed_for_content or file_ext not in allowed_for_content:
+            discard_saved()
+            raise HTTPException(status_code=400, detail=f"{original_name} is not a valid image or video file.")
+
+        saved_filenames.append(filename)
+
     if saved_filenames:
         if booking.attachment_path:
             booking.attachment_path = f"{booking.attachment_path},{','.join(saved_filenames)}"
@@ -1475,7 +1944,7 @@ def delete_service_category(
     return {"message": "Service category deleted successfully"}
 
 @app.post("/api/admin/clean-db")
-def clean_database(db: Session = Depends(get_db)):
+def clean_database(admin_id: int = Depends(get_current_admin_id), db: Session = Depends(get_db)):
     db.query(ChatMessage).delete()
     db.query(Review).delete()
     db.query(PartnerDeclinedBooking).delete()
@@ -1552,7 +2021,7 @@ def clean_database(db: Session = Depends(get_db)):
     if not p2_profile:
         p2_profile = PartnerProfile(
             user_id=part2.id,
-            service_category="AC Repair",
+            service_category="AC & Appliance Repair",
             hourly_rate=450.0,
             experience_years=4,
             availability_status=True,
@@ -1568,3 +2037,24 @@ def clean_database(db: Session = Depends(get_db)):
     return {"message": f"Database cleaned successfully! Remaining test users: {remaining_users}"}
 
 
+# === Combine Socket.IO with the FastAPI app ===========================
+# All routes above are registered on the FastAPI `app` object as usual. Here,
+# at the end of the module (after every route exists), `app` is reassigned to
+# a Socket.IO ASGI app that wraps the FastAPI app as its fallback. uvicorn
+# (via `uvicorn backend.main:app`) ends up serving this combined object.
+#
+# Why not app.mount("/ws", ...)? python-socketio inspects the raw ASGI `path`
+# to decide whether a request belongs to it. Older Starlette versions rewrote
+# `scope['path']` to strip a mount's prefix; current Starlette no longer does
+# this (it uses `root_path` instead), so with app.mount() EVERY WebSocket
+# connection - including a correct one from our own frontend - failed
+# python-socketio's path check and fell into its 404 handler, which replies
+# with an HTTP-type ASGI message during a WebSocket connection. Real ASGI
+# servers correctly treat that as a protocol violation and crash, flooding
+# the server log. Wrapping FastAPI as Socket.IO's `other_asgi_app` instead
+# means Socket.IO sees the true, unmodified request path directly (no mount
+# involved) and routes correctly; anything that isn't a Socket.IO request is
+# forwarded to FastAPI unchanged, including WebSocket requests to any other
+# path, which FastAPI/Starlette already close correctly on their own.
+fastapi_app = app
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="ws/socket.io", on_startup=_capture_event_loop)

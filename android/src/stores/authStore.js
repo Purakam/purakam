@@ -125,6 +125,35 @@ const useAuthStore = create((set, get) => {
       }
     },
 
+    // Forgot/reset password are intentionally NOT auto-signed-in on success:
+    // resetPassword only changes the password server-side, so the caller
+    // should send the user to a normal login with their new password.
+    forgotPassword: async (email) => {
+      set({ isLoading: true, error: null });
+      try {
+        return await authApi.forgotPassword(email);
+      } catch (error) {
+        const message = getErrorMessage(error, 'Could not send reset code');
+        set({ error: message });
+        throw error;
+      } finally {
+        set({ isLoading: false });
+      }
+    },
+
+    resetPassword: async (email, code, newPassword) => {
+      set({ isLoading: true, error: null });
+      try {
+        return await authApi.resetPassword(email, code, newPassword);
+      } catch (error) {
+        const message = getErrorMessage(error, 'Password reset failed');
+        set({ error: message });
+        throw error;
+      } finally {
+        set({ isLoading: false });
+      }
+    },
+
     googleLogin: async (payload) => {
       set({ isLoading: true, error: null });
       try {

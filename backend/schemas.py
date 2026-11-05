@@ -62,6 +62,26 @@ class PartnerProfileResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# Same as PartnerProfileResponse, minus the government ID fields (aadhar_card,
+# pan_card). Used anywhere a partner's profile is shown to someone other than
+# the partner themselves (the public partner listing, or a customer/partner
+# viewing a shared booking) - there's no legitimate reason for a stranger or
+# the other party in a booking to see those numbers, only an admin verifying
+# documents or the partner viewing their own profile should.
+class PartnerProfilePublic(BaseModel):
+    id: int
+    user_id: int
+    service_category: str
+    hourly_rate: float
+    rating: float
+    availability_status: bool
+    bio: Optional[str] = None
+    completed_jobs: int
+    experience_years: Optional[int] = 2
+
+    class Config:
+        from_attributes = True
+
 class PartnerLocationUpdate(BaseModel):
     latitude: float
     longitude: float
@@ -72,6 +92,14 @@ class VerifyEmailRequest(BaseModel):
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str = Field(..., min_length=6)
 
 class UserResponse(BaseModel):
     id: int
@@ -86,6 +114,48 @@ class UserResponse(BaseModel):
     access_token: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+# Same as UserResponse, but nests PartnerProfilePublic (no aadhar_card/pan_card)
+# instead of the full PartnerProfileResponse. Used for the public partner
+# listing and for the other party's details embedded in a booking - anywhere
+# this user's own account isn't the one being shown back to them. Never
+# includes access_token, which only ever belongs in a response to the user
+# who just authenticated.
+class UserPublicResponse(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+    phone: str
+    address: Optional[str] = None
+    role: str
+    is_verified: bool = True
+    created_at: datetime
+    partner_profile: Optional[PartnerProfilePublic] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+# For the PUBLIC partner-browsing listing (GET /api/partners, no auth
+# required) specifically - deliberately narrower than UserPublicResponse,
+# which still carries phone/email/address/latitude/longitude because those
+# ARE legitimately needed once a booking actually exists (coordinating pickup,
+# live-tracking a partner's location on the way). Before any booking exists,
+# a browsing customer only needs enough to decide who to book: a name and
+# the partner's service stats. No contact info or home location belongs in
+# a response anyone on the internet can request without logging in.
+class PartnerListingResponse(BaseModel):
+    id: int
+    name: str
+    role: str
+    is_verified: bool = True
+    created_at: datetime
+    partner_profile: Optional[PartnerProfilePublic] = None
 
     class Config:
         from_attributes = True
@@ -106,7 +176,11 @@ class BookingCreate(BaseModel):
     booking_date: str  # YYYY-MM-DD
     time_slot: str
     details: Optional[str] = None
-    price: float
+    # Accepted for backward compatibility with existing clients that still
+    # send their on-screen estimate, but deliberately never read: the server
+    # computes the real price itself from the service category's base_price,
+    # so a client can no longer set what it actually gets charged.
+    price: Optional[float] = None
     address: str
     payment_method: str = "UPI"
     latitude: Optional[float] = None
@@ -155,9 +229,12 @@ class BookingResponse(BaseModel):
     accepted_at: Optional[datetime] = None
     created_at: datetime
     
-    # Optionally embed customer and partner user details
-    customer: Optional[UserResponse] = None
-    partner: Optional[UserResponse] = None
+    # Optionally embed customer and partner user details. UserPublicResponse
+    # (not UserResponse) deliberately so the OTHER party in a booking never
+    # sees the partner's Aadhaar/PAN - only the partner's own profile view
+    # and admin routes return those.
+    customer: Optional[UserPublicResponse] = None
+    partner: Optional[UserPublicResponse] = None
     review: Optional[ReviewResponse] = None
 
     class Config:

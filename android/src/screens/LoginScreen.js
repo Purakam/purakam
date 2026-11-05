@@ -187,6 +187,10 @@ export default function LoginScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
+            <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')} style={styles.forgotPasswordLink}>
+              <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={isLoading}>
               <Text style={styles.primaryButtonText}>{isLoading ? 'Signing in...' : 'Sign In'}</Text>
               <MaterialCommunityIcons name="login" size={18} color={colors.accentDark} style={styles.buttonIcon} />
@@ -284,8 +288,8 @@ export default function LoginScreen({ navigation }) {
               <Text style={styles.quickSelectHeader}>Quick Select Test Accounts</Text>
               <View style={styles.quickSelectGrid}>
                 {[
-                  { email: 'customer@purakam.in', name: 'Customer Test User', role: 'customer', icon: 'account-outline' },
-                  { email: 'vijay@purakam.in', name: 'Vijay Professional', role: 'partner', icon: 'briefcase-outline' },
+                  { email: 'user@purakam.in', name: 'Rahul Sharma (Customer)', role: 'customer', icon: 'account-outline' },
+                  { email: 'partner@purakam.in', name: 'Rajesh Kumar (Electrician)', role: 'partner', icon: 'briefcase-outline' },
                   { email: 'new.google.user@gmail.com', name: 'New Google User', role: 'customer', icon: 'account-plus-outline' },
                 ].map((acc) => (
                   <TouchableOpacity
@@ -391,6 +395,8 @@ const getStyles = (colors, isDark) =>
       marginBottom: 18,
     },
     googleText: { color: colors.textPrimary, fontWeight: '700', marginLeft: 10 },
+        forgotPasswordLink: { alignSelf: 'flex-end', marginBottom: 8, marginTop: -8 },
+    forgotPasswordText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
     fieldLabelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 },
     fieldLabel: { color: colors.textSecondary, fontWeight: '600' },
     footerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 18 },

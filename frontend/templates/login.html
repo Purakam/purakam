@@ -18,6 +18,9 @@
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" class="form-input" placeholder="••••••••" required>
+                <div style="text-align: right; margin-top: 0.4rem;">
+                    <a href="{{ url_for('forgot_password') }}" style="font-size: 0.85rem; color: var(--text-secondary);">Forgot password?</a>
+                </div>
             </div>
 
             <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; margin-top: 1.5rem;">
@@ -43,21 +46,20 @@
 
 
         <!-- Mock Credentials helper block -->
+        {% if demo_accounts %}
         <div style="margin-top: 2rem; padding: 1rem; background: rgba(99, 102, 241, 0.08); border-radius: var(--border-radius-sm); border: 1px dashed rgba(99, 102, 241, 0.2); font-size: 0.85rem;">
             <h4 style="color: #a5b4fc; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.3rem;">
-                <i data-lucide="info" style="width: 14px; height: 14px;"></i> Demo Accounts for Verification
+                <i data-lucide="info" style="width: 14px; height: 14px;"></i> Demo Accounts (local development only)
             </h4>
             <div style="display: grid; gap: 0.5rem; color: var(--text-secondary);">
-                <div><strong>Customer Profile:</strong><br>
-                Email: <code>customer@purakam.in</code> / Password: <code>customer123</code></div>
-                <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.05);">
-                <div><strong>Electrician Profile (Rajesh):</strong><br>
-                Email: <code>rajesh@purakam.in</code> / Password: <code>partner123</code></div>
-                <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.05);">
-                <div><strong>AC & Appliance Profile (Amit):</strong><br>
-                Email: <code>amit@purakam.in</code> / Password: <code>partner123</code></div>
+                {% for acc in demo_accounts %}
+                {% if not loop.first %}<hr style="border: none; border-top: 1px solid rgba(255,255,255,0.05);">{% endif %}
+                <div><strong>{{ acc.label }}:</strong><br>
+                Email: <code>{{ acc.email }}</code> / Password: <code>{{ acc.password }}</code></div>
+                {% endfor %}
             </div>
         </div>
+        {% endif %}
 
         <div class="auth-footer">
             Don't have an account? <a href="{{ url_for('register') }}">Register here</a>

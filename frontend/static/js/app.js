@@ -10,12 +10,17 @@ let socket = null;
 
 function initRealtimeSocket() {
     if (typeof io === 'undefined') return;
+    // The realtime server only accepts signed-in users, so there's nothing to
+    // connect to for a logged-out visitor.
+    const socketToken = (window.userSession && window.userSession.authToken) || '';
+    if (!socketToken) return;
     const wsHost = API_URL.replace('/api', '');
     
     try {
         socket = io(wsHost, {
             path: '/ws/socket.io',
-            transports: ['websocket', 'polling']
+            transports: ['websocket', 'polling'],
+            auth: { token: socketToken }
         });
 
         socket.on('connect', () => {
@@ -46,6 +51,12 @@ function initRealtimeSocket() {
         });
 
         socket.on('booking_updated', (data) => {
+            setTimeout(() => window.location.reload(), 1200);
+        });
+
+        // A job another partner just took (or the customer cancelled): drop it
+        // from this partner's open list.
+        socket.on('booking_unavailable', (data) => {
             setTimeout(() => window.location.reload(), 1200);
         });
 
@@ -409,7 +420,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         key: window.RAZORPAY_KEY_ID || orderData.key_id || "rzp_test_dummy_key_id",
                         amount: orderData.amount,
                         currency: "INR",
-                        name: "Servify",
+                        name: "Purakam",
                         description: `${payload.service_category} Service Booking #${booking.id}`,
                         order_id: orderData.order_id,
                         handler: async function (response) {
@@ -1267,5 +1278,3 @@ async function fetchCurrentLocationAddress(buttonEl) {
         { enableHighAccuracy: true, timeout: 8000 }
     );
 }
-
-

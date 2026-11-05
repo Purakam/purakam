@@ -18,6 +18,7 @@ import useBookingStore from '../stores/bookingStore';
 import { formatStatus, isActiveBooking, isUpcomingBooking, isCompletedBooking, isCancelledBooking } from '../utils/bookings';
 import { useTheme, SIZES, SHADOW } from '../theme';
 import { useNotificationStore } from '../stores/notificationStore';
+import { payForBooking } from '../utils/razorpayPayment';
 import { getServiceIcon } from '../utils/icons';
 import { BookingsShimmer } from '../components/Shimmer';
 import BroadcastingTimer from '../components/BroadcastingTimer';
@@ -116,9 +117,12 @@ function ProgressTimeline({ status, colors }) {
   );
 }
 
-function ActiveBookingCard({ item, onCancel, navigation, colors }) {
+function ActiveBookingCard({ item, onCancel, onPayNow, navigation, colors }) {
   const styles = getStyles(colors);
   const canCancel = ['requested', 'accepted'].includes(item.status);
+  // An online (UPI) booking whose payment was never completed - e.g. the
+  // payment sheet was closed - can be paid from here at any time.
+  const needsPayment = item.payment_method === 'UPI' && item.payment_status === 'pending';
 
   return (
     <View style={styles.card}>
@@ -201,12 +205,20 @@ function ActiveBookingCard({ item, onCancel, navigation, colors }) {
             <Text style={styles.footerLabel}>TOTAL AMOUNT</Text>
             <Text style={styles.footerValue}>₹{Math.round(item.price)}</Text>
           </View>
-          {canCancel && (
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => onCancel(item.id)}>
-              <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.error} />
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {needsPayment && (
+              <TouchableOpacity style={styles.payNowBtn} onPress={() => onPayNow(item)}>
+                <MaterialCommunityIcons name="credit-card-outline" size={16} color={colors.accentDark} />
+                <Text style={styles.payNowText}>Pay Now</Text>
+              </TouchableOpacity>
+            )}
+            {canCancel && (
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => onCancel(item.id)}>
+                <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.error} />
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -288,6 +300,24 @@ export default function BookingsScreen({ navigation }) {
 
   const COMPLIMENT_TAGS = ['On Time', 'Clean Work', 'Professional', 'Polite', 'Good Value', 'Helpful'];
 
+  const handlePayNow = async (booking) => {
+    const result = await payForBooking(booking, useAuthStore.getState().user);
+    if (result.success) {
+      showToast('success', 'Payment Complete', 'Your payment was received. Thank you!');
+    } else if (result.cancelled) {
+      showToast('warning', 'Payment Not Completed', 'You can pay any time from here.');
+    } else {
+      showToast('error', 'Payment Issue', result.message);
+    }
+    // Refresh either way - the status may have changed (e.g. the webhook
+    // recorded a payment our own confirmation call never got to).
+    try {
+      await fetchBookings();
+    } catch (err) {
+      console.log('Error refreshing bookings after payment:', err);
+    }
+  };
+
   const handleOpenRatingTray = (booking) => {
     setRatingBooking(booking);
     setRatingValue(5); // Default to 5 stars
@@ -367,7 +397,7 @@ export default function BookingsScreen({ navigation }) {
 
   const renderBooking = ({ item }) =>
     isActiveBooking(item) ? (
-      <ActiveBookingCard item={item} onCancel={handleCancel} navigation={navigation} colors={colors} />
+      <ActiveBookingCard item={item} onCancel={handleCancel} onPayNow={handlePayNow} navigation={navigation} colors={colors} />
     ) : (
       <PastBookingCard item={item} navigation={navigation} colors={colors} onRateJob={handleOpenRatingTray} />
     );
@@ -703,6 +733,16 @@ const getStyles = (colors) =>
     },
     footerLabel: { color: colors.textSecondary, fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
     footerValue: { color: colors.textPrimary, fontWeight: '900', fontSize: 18, marginTop: 2 },
+    payNowBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: '#22C55E',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 12,
+    },
+    payNowText: { fontSize: 13, fontWeight: '800', color: colors.accentDark },
     cancelBtn: {
       flexDirection: 'row',
       alignItems: 'center',

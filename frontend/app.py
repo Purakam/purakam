@@ -1,8 +1,16 @@
 import os
 import secrets
+from pathlib import Path
 from urllib.parse import urlparse
+from dotenv import load_dotenv
 from flask import Flask, render_template, redirect, url_for, request, session, flash, jsonify
 import requests
+
+# Load variables from a .env file at the repo root, if one exists - resolved from
+# this file's own location so it works the same regardless of which folder
+# `python frontend/app.py` is run from. Never overrides a variable already set
+# in the real environment, so this has no effect at all on Render.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 app = Flask(__name__)
 
@@ -16,6 +24,18 @@ if not _flask_secret:
     else:
         _flask_secret = "dev-only-insecure-session-key"
 app.secret_key = _flask_secret
+
+IS_PRODUCTION = bool(os.environ.get("RENDER")) or os.environ.get("APP_ENV", "").lower() == "production"
+
+# The demo accounts that `python -m backend.seed` creates for local development.
+# They're only offered on the login page outside production: there they don't
+# exist (the seed skips them), and advertising logins on a live site is wrong
+# in any case.
+DEMO_ACCOUNTS = [
+    {"label": "Customer", "email": "user@purakam.in", "password": "password123"},
+    {"label": "Electrician (Rajesh)", "email": "partner@purakam.in", "password": "password123"},
+    {"label": "AC & Appliance (Amit)", "email": "acservice@purakam.in", "password": "password123"},
+]
 
 # Mock Google sign-in (no real Google check) must never be reachable in production.
 ALLOW_MOCK_GOOGLE_LOGIN = os.environ.get("ALLOW_MOCK_GOOGLE_LOGIN", "").strip().lower() in ("1", "true", "yes")
@@ -312,7 +332,7 @@ def login():
         except Exception as e:
             flash(f"Backend server is offline: {e}", "danger")
             
-    return render_template("login.html")
+    return render_template("login.html", demo_accounts=[] if IS_PRODUCTION else DEMO_ACCOUNTS)
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -400,6 +420,58 @@ def verify_email():
             flash(f"Backend server error: {e}", "danger")
             
     return render_template("verify_email.html", email=email)
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip()
+        try:
+            requests.post(
+                f"{BACKEND_API_URL}/auth/forgot-password",
+                json={"email": email},
+                timeout=20
+            )
+            # Always show the same message, whether or not the email exists, so
+            # this page can't be used to discover which emails have accounts.
+            flash("If an account exists for this email, a 6-digit reset code has been sent.", "success")
+            return redirect(url_for("reset_password", email=email))
+        except Exception as e:
+            flash(f"Backend server error: {e}", "danger")
+
+    return render_template("forgot_password.html", email=request.args.get("email", ""))
+
+
+@app.route("/reset-password", methods=["GET", "POST"])
+def reset_password():
+    email = (request.args.get("email") or request.form.get("email") or "").strip()
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        new_password = request.form.get("new_password") or ""
+        confirm_password = request.form.get("confirm_password") or ""
+
+        if new_password != confirm_password:
+            flash("Passwords do not match.", "danger")
+            return render_template("reset_password.html", email=email)
+
+        try:
+            r = requests.post(
+                f"{BACKEND_API_URL}/auth/reset-password",
+                json={"email": email, "code": code, "new_password": new_password},
+                timeout=20
+            )
+            if r.status_code == 200:
+                # Deliberately not logging the user in automatically here - they
+                # confirm the new password actually works via a fresh login.
+                flash("Password reset successfully! Please sign in with your new password.", "success")
+                return redirect(url_for("login"))
+            else:
+                flash(api_error(r, "Invalid or expired reset code"), "danger")
+        except Exception as e:
+            flash(f"Backend server error: {e}", "danger")
+
+    return render_template("reset_password.html", email=email)
 
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")

@@ -2,9 +2,20 @@ import os
 import hashlib
 import hmac
 import secrets
+from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, text, inspect, Integer, String, Float, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+
+# Load variables from a .env file at the repo root, if one exists. This is
+# resolved from this file's own location, so it works the same way no matter
+# which folder a command (uvicorn, backend.seed, backend.create_admin, ...)
+# is actually run from. It NEVER overrides a variable that's already set in
+# the real environment (override=False, the default), so on Render - where
+# variables are set via the dashboard, not a .env file - this has no effect
+# at all. This is purely a local-development convenience.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./purakam.db")
 
@@ -68,6 +79,8 @@ class User(Base):
     is_verified = Column(Boolean, default=True)  # Default True for existing users, False for new registrations
     verification_code = Column(String, nullable=True)
     verification_code_expires_at = Column(DateTime, nullable=True)
+    reset_code = Column(String, nullable=True)
+    reset_code_expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -195,6 +208,8 @@ def init_db():
                 _add_column_if_missing(conn, inspector, "users", "is_verified", "BOOLEAN DEFAULT TRUE")
                 _add_column_if_missing(conn, inspector, "users", "verification_code", "VARCHAR")
                 _add_column_if_missing(conn, inspector, "users", "verification_code_expires_at", "TIMESTAMP")
+                _add_column_if_missing(conn, inspector, "users", "reset_code", "VARCHAR")
+                _add_column_if_missing(conn, inspector, "users", "reset_code_expires_at", "TIMESTAMP")
             if inspector.has_table("partner_profiles"):
                 _add_column_if_missing(conn, inspector, "partner_profiles", "experience_years", "INTEGER DEFAULT 2")
     except Exception as e:
